@@ -1,0 +1,22 @@
+{
+  "name": "pi-omlx-picker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Pi extension that discovers OMLX models dynamically and lets you pick one.",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --import tsx --test 'test/*.test.ts'",
+    "typecheck": "tsc --noEmit"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "devDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0"
+  }
+}
