@@ -37,13 +37,13 @@ test("parseModelsResponse throws on missing data array", () => {
 test("parseModelsStatusResponse extracts id, contextWindow, maxTokens", () => {
 	const json = {
 		models: [
-			{ id: "m1", max_context_window: 256000, max_tokens: 32768 },
-			{ id: "m2", max_context_window: 128000, max_tokens: 8192 },
+			{ id: "m1", max_context_window: 256000, max_tokens: 32768, thinking_default: true },
+			{ id: "m2", max_context_window: 128000, max_tokens: 8192, thinking_default: null },
 		],
 	};
 	assert.deepEqual(parseModelsStatusResponse(json), [
-		{ id: "m1", contextWindow: 256000, maxTokens: 32768 },
-		{ id: "m2", contextWindow: 128000, maxTokens: 8192 },
+		{ id: "m1", contextWindow: 256000, maxTokens: 32768, thinkingDefault: true },
+		{ id: "m2", contextWindow: 128000, maxTokens: 8192, thinkingDefault: null },
 	]);
 });
 
@@ -66,7 +66,7 @@ test("fetchModels prefers /models/status", async () => {
 		calls.push(url);
 		if (url.endsWith("/models/status")) {
 			return new Response(
-				JSON.stringify({ models: [{ id: "x", max_context_window: 256000, max_tokens: 32768 }] }),
+				JSON.stringify({ models: [{ id: "x", max_context_window: 256000, max_tokens: 32768, thinking_default: false }] }),
 				{ status: 200 },
 			);
 		}
@@ -74,7 +74,7 @@ test("fetchModels prefers /models/status", async () => {
 	}) as typeof fetch;
 	try {
 		const models = await fetchModels("http://example.test/v1", "k");
-		assert.deepEqual(models, [{ id: "x", contextWindow: 256000, maxTokens: 32768 }]);
+		assert.deepEqual(models, [{ id: "x", contextWindow: 256000, maxTokens: 32768, thinkingDefault: false }]);
 		assert.deepEqual(calls, ["http://example.test/v1/models/status"]);
 	} finally {
 		globalThis.fetch = originalFetch;

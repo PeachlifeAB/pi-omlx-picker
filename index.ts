@@ -1,23 +1,137 @@
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { fetchModels, type OmlxModel } from "./src/catalog.ts";
 import { loadConfig, MissingEnvError, type OmlxConfig } from "./src/config.ts";
+import { compactOmlxContext } from "./src/context.ts";
 import { buildLabels } from "./src/labels.ts";
+import { applyOmlxCompatibilityOverlay } from "./src/overlay.ts";
 import { toProviderConfig } from "./src/provider.ts";
+import {
+	getAutoplanFailureMessage,
+	getAutoplanInvalidTurnReason,
+	getLatestAutoplanInvocationKey,
+} from "./src/recovery.ts";
+import { applyOmlxThinkingControls } from "./src/thinking.ts";
 
 const PROVIDER = "omlx";
 const STATUS_KEY = "omlx";
+const DEBUG_LOG_DIR = join(homedir(), ".pi", "packages", "pi-omlx-picker", "log");
+const DEBUG_LOG_FILE = join(DEBUG_LOG_DIR, "provider-debug.log");
+const EXTENSION_SINGLETON_KEY = Symbol.for("pi-omlx-picker/loaded");
 
 interface State {
 	config: OmlxConfig | undefined;
 	catalog: OmlxModel[];
 	registered: boolean;
 	lastError: string | undefined;
+	autoplanRecoveryCount: number;
+	lastAutoplanFailureKey: string | undefined;
 }
 
 export default async function (pi: ExtensionAPI): Promise<void> {
-	const state: State = { config: undefined, catalog: [], registered: false, lastError: undefined };
+	const globalState = globalThis as Record<PropertyKey, unknown>;
+	if (globalState[EXTENSION_SINGLETON_KEY]) {
+		debugLog("extension_load_skipped", { provider: PROVIDER, reason: "already_loaded" });
+		return;
+	}
+	globalState[EXTENSION_SINGLETON_KEY] = true;
 
+	const state: State = {
+		config: undefined,
+		catalog: [],
+		registered: false,
+		lastError: undefined,
+		autoplanRecoveryCount: 0,
+		lastAutoplanFailureKey: undefined,
+	};
+
+	debugLog("extension_load", { provider: PROVIDER });
 	await initialRegister(pi, state);
+
+	pi.on("session_start", () => {
+		state.autoplanRecoveryCount = 0;
+		state.lastAutoplanFailureKey = undefined;
+		debugLog("session_start", { provider: PROVIDER, autoplanRecoveryCount: 0 });
+	});
+
+	(pi.on as any)("context", (event: any, ctx: any) => {
+		if (ctx.model?.provider !== PROVIDER) return;
+		const result = compactOmlxContext(Array.isArray(event?.messages) ? event.messages : []);
+		if (!result.stats) return;
+		debugLog("context_compaction", {
+			model: ctx.model?.id,
+			...result.stats,
+		});
+		return { messages: result.messages };
+	});
+
+	pi.on("before_provider_request", (event, ctx) => {
+		if (ctx.model?.provider !== PROVIDER) return;
+		const overlaidPayload = applyCompatibilityOverlay(event.payload, ctx);
+		const payload = applyOmlxThinkingControls(overlaidPayload, pi.getThinkingLevel());
+		const autoplanPayloadPath = writeAutoplanPayloadSnapshot(payload, ctx.model?.id);
+		debugLog("before_provider_request", {
+			model: ctx.model?.id,
+			thinkingLevel: pi.getThinkingLevel(),
+			autoplanPayloadPath,
+			payload: summarizePayload(payload),
+		});
+		return payload;
+	});
+
+	pi.on("after_provider_response", (event: any, ctx: any) => {
+		if (ctx.model?.provider !== PROVIDER) return;
+		debugLog("after_provider_response", {
+			model: ctx.model?.id,
+			status: event?.status,
+			headers: summarizeHeaders(event?.headers),
+		});
+	});
+
+	pi.on("turn_end", (event: any, ctx: any) => {
+		if (ctx.model?.provider !== PROVIDER) return;
+		const toolResults = Array.isArray(event?.toolResults) ? event.toolResults.length : 0;
+		const branchMessages = extractBranchMessages(ctx);
+		debugLog("turn_end", {
+			model: ctx.model?.id,
+			turnIndex: event?.turnIndex,
+			message: summarizeMessage(event?.message),
+			toolResults,
+		});
+
+		const invalidReason = getAutoplanInvalidTurnReason(event?.message, toolResults, branchMessages);
+		if (!invalidReason) return;
+		const invocationKey = getLatestAutoplanInvocationKey(branchMessages);
+		if (invocationKey && state.lastAutoplanFailureKey === invocationKey) {
+			debugLog("autoplan_invalid_turn_suppressed", {
+				model: ctx.model?.id,
+				reason: invalidReason,
+				invocationKey,
+			});
+			return;
+		}
+		state.lastAutoplanFailureKey = invocationKey;
+
+		debugLog("autoplan_invalid_turn", {
+			model: ctx.model?.id,
+			reason: invalidReason,
+			invocationKey,
+		});
+		ctx.ui.setStatus(STATUS_KEY, "OMLX model returned invalid autoplan output");
+		ctx.ui.notify(
+			`${getAutoplanFailureMessage(invalidReason)} Recommended next step: switch to a stronger model or continue without /autoplan on OMLX for this session.`,
+			"warning",
+		);
+	});
+
+	pi.on("tool_call", (event: any) => {
+		debugLog("tool_call", {
+			toolName: event?.toolName,
+			input: summarizeToolInput(event?.input),
+		});
+	});
 
 	pi.registerCommand("omlx", {
 		description: "Pick an OMLX model",
@@ -32,6 +146,188 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 			await refresh(pi, ctx, state, { silent: false });
 		},
 	});
+}
+
+function applyCompatibilityOverlay(payload: unknown, ctx: any): unknown {
+	if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+	const current = payload as Record<string, unknown>;
+	const messages = Array.isArray(current.messages) ? current.messages : undefined;
+	if (!messages) return payload;
+
+	const result = applyOmlxCompatibilityOverlay(messages);
+	if (!result.stats) return payload;
+
+	debugLog("compatibility_overlay", {
+		model: ctx.model?.id,
+		...result.stats,
+	});
+
+	return {
+		...current,
+		messages: result.messages,
+	};
+}
+
+function debugLog(kind: string, details: Record<string, unknown>): void {
+	try {
+		mkdirSync(DEBUG_LOG_DIR, { recursive: true });
+		appendFileSync(
+			DEBUG_LOG_FILE,
+			`${JSON.stringify({ ts: new Date().toISOString(), kind, ...details })}\n`,
+			"utf8",
+		);
+	} catch {
+		// Logging must never break the provider path.
+	}
+}
+
+function writeAutoplanPayloadSnapshot(payload: unknown, model: string | undefined): string | undefined {
+	try {
+		if (!payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
+		const current = payload as Record<string, unknown>;
+		const messages = Array.isArray(current.messages) ? current.messages : [];
+		const hasAutoplan = messages.some((message) => messageTextIncludes(message, "<skill name=\"gstack-autoplan\""));
+		if (!hasAutoplan) return undefined;
+
+		mkdirSync(DEBUG_LOG_DIR, { recursive: true });
+		const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+		const path = join(DEBUG_LOG_DIR, `autoplan-payload-${stamp}.json`);
+		writeFileSync(
+			path,
+			JSON.stringify(
+				{
+					ts: new Date().toISOString(),
+					model,
+					payload,
+				},
+				null,
+				2,
+			),
+			"utf8",
+		);
+		return path;
+	} catch {
+		return undefined;
+	}
+}
+
+function summarizePayload(payload: unknown): Record<string, unknown> {
+	if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+		return { type: typeof payload };
+	}
+
+	const current = payload as Record<string, unknown>;
+	const messages = Array.isArray(current.messages) ? current.messages : [];
+	return {
+		keys: Object.keys(current).sort(),
+		model: current.model,
+		stream: current.stream,
+		max_tokens: current.max_tokens,
+		thinking_budget: current.thinking_budget,
+		chat_template_kwargs: current.chat_template_kwargs,
+		messageCount: messages.length,
+		messageChars: messages.reduce((sum, message) => sum + estimateMessageChars(message), 0),
+		lastMessagePreview: previewMessage(messages.at(-1)),
+	};
+}
+
+function estimateMessageChars(message: unknown): number {
+	if (!message || typeof message !== "object") return 0;
+	const content = (message as Record<string, unknown>).content;
+	if (typeof content === "string") return content.length;
+	if (!Array.isArray(content)) return 0;
+	return content.reduce((sum, item) => {
+		if (!item || typeof item !== "object") return sum;
+		const text = (item as Record<string, unknown>).text;
+		return sum + (typeof text === "string" ? text.length : 0);
+	}, 0);
+}
+
+function previewMessage(message: unknown): string | undefined {
+	if (!message || typeof message !== "object") return undefined;
+	const content = (message as Record<string, unknown>).content;
+	if (typeof content === "string") return content.slice(0, 240);
+	if (!Array.isArray(content)) return undefined;
+	const text = content
+		.map((item) => (item && typeof item === "object" ? (item as Record<string, unknown>).text : undefined))
+		.find((item) => typeof item === "string");
+	return typeof text === "string" ? text.slice(0, 240) : undefined;
+}
+
+function messageTextIncludes(message: unknown, pattern: string): boolean {
+	if (!message || typeof message !== "object") return false;
+	const content = (message as Record<string, unknown>).content;
+	if (typeof content === "string") return content.includes(pattern);
+	if (!Array.isArray(content)) return false;
+	return content.some((item) => {
+		if (!item || typeof item !== "object") return false;
+		const text = (item as Record<string, unknown>).text;
+		return typeof text === "string" && text.includes(pattern);
+	});
+}
+
+function summarizeHeaders(headers: unknown): Record<string, unknown> | undefined {
+	if (!headers || typeof headers !== "object") return undefined;
+	const entries: [string, unknown][] = [];
+	if (typeof (headers as { forEach?: unknown }).forEach === "function") {
+		(headers as { forEach: (callback: (value: unknown, key: string) => void) => void }).forEach((value, key) => {
+			entries.push([key, value]);
+		});
+	} else {
+		entries.push(...Object.entries(headers as Record<string, unknown>));
+	}
+	const interesting = ["content-type", "x-request-id", "openai-processing-ms"];
+	const filtered = entries.filter(([key]) => interesting.includes(key.toLowerCase()));
+	return Object.fromEntries(filtered);
+}
+
+function summarizeMessage(message: unknown): Record<string, unknown> {
+	if (!message || typeof message !== "object") return { present: false };
+	const current = message as Record<string, unknown>;
+	const content = Array.isArray(current.content) ? current.content : [];
+	const textParts = content
+		.map((item) => {
+			if (!item || typeof item !== "object") return undefined;
+			const record = item as Record<string, unknown>;
+			return typeof record.text === "string" ? record.text : undefined;
+		})
+		.filter((item): item is string => typeof item === "string");
+
+	const toolCalls = content
+		.map((item) => {
+			if (!item || typeof item !== "object") return undefined;
+			const record = item as Record<string, unknown>;
+			return record.type === "toolCall" ? record.name : undefined;
+		})
+		.filter((item): item is string => typeof item === "string");
+
+	return {
+		role: current.role,
+		stopReason: current.stopReason,
+		contentTypes: content
+			.map((item) => (item && typeof item === "object" ? (item as Record<string, unknown>).type : undefined))
+			.filter((item) => typeof item === "string"),
+		textPreview: textParts.join("\n").slice(0, 400),
+		toolCalls,
+		usage: current.usage,
+	};
+}
+
+function summarizeToolInput(input: unknown): unknown {
+	if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+	const current = { ...(input as Record<string, unknown>) };
+	if (typeof current.command === "string") {
+		current.command = current.command.slice(0, 240);
+	}
+	return current;
+}
+
+function extractBranchMessages(ctx: any): unknown[] {
+	if (!ctx?.sessionManager || typeof ctx.sessionManager.getBranch !== "function") return [];
+	return ctx.sessionManager
+		.getBranch()
+		.filter((entry: any) => entry?.type === "message")
+		.map((entry: any) => entry.message);
 }
 
 async function initialRegister(pi: ExtensionAPI, state: State): Promise<void> {

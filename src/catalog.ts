@@ -2,6 +2,7 @@ export interface OmlxModel {
 	id: string;
 	contextWindow?: number;
 	maxTokens?: number;
+	thinkingDefault?: boolean | null;
 }
 
 interface OpenAIModelsResponse {
@@ -10,7 +11,12 @@ interface OpenAIModelsResponse {
 }
 
 interface OmlxModelsStatusResponse {
-	models: Array<{ id: string; max_context_window?: number; max_tokens?: number }>;
+	models: Array<{
+		id: string;
+		max_context_window?: number;
+		max_tokens?: number;
+		thinking_default?: boolean | null;
+	}>;
 }
 
 export function parseModelsResponse(json: unknown): OmlxModel[] {
@@ -43,6 +49,7 @@ export function parseModelsStatusResponse(json: unknown): OmlxModel[] {
 		const m: OmlxModel = { id: entry.id };
 		if (typeof entry.max_context_window === "number") m.contextWindow = entry.max_context_window;
 		if (typeof entry.max_tokens === "number") m.maxTokens = entry.max_tokens;
+		if ("thinking_default" in entry) m.thinkingDefault = entry.thinking_default ?? null;
 		out.push(m);
 	}
 	return out;

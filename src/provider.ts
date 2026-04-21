@@ -20,7 +20,7 @@ function toProviderModel(m: OmlxModel): ProviderModelConfig {
 	return {
 		id: m.id,
 		name: m.id,
-		reasoning: false,
+		reasoning: m.thinkingDefault !== undefined && m.thinkingDefault !== null,
 		input: ["text"],
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: m.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
