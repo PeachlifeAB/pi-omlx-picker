@@ -3,6 +3,7 @@ export interface OmlxModel {
 	contextWindow?: number;
 	maxTokens?: number;
 	thinkingDefault?: boolean | null;
+	modelType?: string | null;
 }
 
 interface OpenAIModelsResponse {
@@ -16,6 +17,8 @@ interface OmlxModelsStatusResponse {
 		max_context_window?: number;
 		max_tokens?: number;
 		thinking_default?: boolean | null;
+		model_type?: string | null;
+		engine_type?: string | null;
 	}>;
 }
 
@@ -50,6 +53,8 @@ export function parseModelsStatusResponse(json: unknown): OmlxModel[] {
 		if (typeof entry.max_context_window === "number") m.contextWindow = entry.max_context_window;
 		if (typeof entry.max_tokens === "number") m.maxTokens = entry.max_tokens;
 		if ("thinking_default" in entry) m.thinkingDefault = entry.thinking_default ?? null;
+		const type = entry.model_type ?? entry.engine_type;
+		if (typeof type === "string") m.modelType = type;
 		out.push(m);
 	}
 	return out;

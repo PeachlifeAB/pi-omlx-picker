@@ -17,11 +17,12 @@ export function toProviderConfig(apiRoot: string, apiKeyEnvVar: string, models: 
 }
 
 function toProviderModel(m: OmlxModel): ProviderModelConfig {
+	const input: ("text" | "image")[] = m.modelType === "vlm" ? ["text", "image"] : ["text"];
 	return {
 		id: m.id,
 		name: m.id,
 		reasoning: m.thinkingDefault !== undefined && m.thinkingDefault !== null,
-		input: ["text"],
+		input,
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: m.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
 		maxTokens: m.maxTokens ?? DEFAULT_MAX_TOKENS,
