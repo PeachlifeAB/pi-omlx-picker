@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
@@ -28,6 +28,8 @@ interface State {
 	lastError: string | undefined;
 	autoplanRecoveryCount: number;
 	lastAutoplanFailureKey: string | undefined;
+	lastToolCallFingerprint: string | undefined;
+	repeatedToolCallCount: number;
 }
 
 export default async function (pi: ExtensionAPI): Promise<void> {
@@ -45,6 +47,8 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		lastError: undefined,
 		autoplanRecoveryCount: 0,
 		lastAutoplanFailureKey: undefined,
+		lastToolCallFingerprint: undefined,
+		repeatedToolCallCount: 0,
 	};
 
 	debugLog("extension_load", { provider: PROVIDER });
@@ -53,7 +57,36 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 	pi.on("session_start", () => {
 		state.autoplanRecoveryCount = 0;
 		state.lastAutoplanFailureKey = undefined;
+		state.lastToolCallFingerprint = undefined;
+		state.repeatedToolCallCount = 0;
 		debugLog("session_start", { provider: PROVIDER, autoplanRecoveryCount: 0 });
+	});
+
+	const IMAGE_PATH_RE = /(?:^|\s)(\/[^\s]+\.(?:png|jpg|jpeg|webp|gif))(?=\s|$)/gi;
+	const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif" };
+
+	pi.on("input", (event) => {
+		const matches = [...event.text.matchAll(IMAGE_PATH_RE)];
+		if (matches.length === 0) return { action: "continue" };
+
+		const images: { type: "image"; data: string; mimeType: string }[] = [];
+		let text = event.text;
+
+		for (const match of matches) {
+			const path = match[1];
+			try {
+				const data = readFileSync(path).toString("base64");
+				const ext = path.split(".").pop()!.toLowerCase();
+				images.push({ type: "image", data, mimeType: MIME[ext] ?? "image/png" });
+				text = text.replace(match[0], " ").trim();
+				debugLog("image_attached", { path, mimeType: MIME[ext] ?? "image/png" });
+			} catch (err) {
+				debugLog("image_attach_error", { path, error: String(err) });
+			}
+		}
+
+		if (images.length === 0) return { action: "continue" };
+		return { action: "transform", text: text || " ", images };
 	});
 
 	(pi.on as any)("context", (event: any, ctx: any) => {
@@ -100,6 +133,30 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 			message: summarizeMessage(event?.message),
 			toolResults,
 		});
+
+		// Detect repeated identical tool calls (stuck loop).
+		const toolCalls: any[] = Array.isArray(event?.message?.content)
+			? event.message.content.filter((c: any) => c?.type === "toolCall")
+			: [];
+		if (toolCalls.length > 0) {
+			const fingerprint = toolCalls.map((c: any) => `${c.name}:${JSON.stringify(c.arguments)}`).join("|");
+			if (fingerprint === state.lastToolCallFingerprint) {
+				state.repeatedToolCallCount++;
+				debugLog("repeated_tool_call", { model: ctx.model?.id, count: state.repeatedToolCallCount, fingerprint });
+				if (state.repeatedToolCallCount >= 2) {
+					ctx.ui.notify(
+						`Model has repeated the same tool call ${state.repeatedToolCallCount + 1} times in a row — it may be stuck in a loop. Consider switching models or interrupting.`,
+						"warning",
+					);
+				}
+			} else {
+				state.lastToolCallFingerprint = fingerprint;
+				state.repeatedToolCallCount = 0;
+			}
+		} else {
+			state.lastToolCallFingerprint = undefined;
+			state.repeatedToolCallCount = 0;
+		}
 
 		const invalidReason = getAutoplanInvalidTurnReason(event?.message, toolResults, branchMessages);
 		if (!invalidReason) return;
