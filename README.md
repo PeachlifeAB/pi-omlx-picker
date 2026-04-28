@@ -6,15 +6,15 @@ All detected models can be selected with native `/model` list alongside your oth
 
 ## Install
 
-```
+```bash
 pi install /absolute/path/to/packages/pi-omlx-picker
 ```
 
 ## Configure
 
-Copy `.env-example` to `.env` or export these in your shell:
+Copy `.env.example` to `.env` or export these in your shell:
 
-```
+```bash
 export OMLX_BASE_URL="http://127.0.0.1:8000/v1"
 export OMLX_API_KEY="omlx-..."
 ```
