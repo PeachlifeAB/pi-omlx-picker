@@ -1,10 +1,12 @@
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { fetchModels, type OmlxModel } from "./src/catalog.ts";
 import { loadConfig, MissingEnvError, type OmlxConfig } from "./src/config.ts";
 import { compactOmlxContext } from "./src/context.ts";
+import { mergeDotenv, parseDotenv } from "./src/dotenv.ts";
 import { buildLabels } from "./src/labels.ts";
 import { applyOmlxCompatibilityOverlay } from "./src/overlay.ts";
 import { toProviderConfig } from "./src/provider.ts";
@@ -20,6 +22,19 @@ const STATUS_KEY = "omlx";
 const DEBUG_LOG_DIR = join(homedir(), ".pi", "packages", "pi-omlx-picker", "log");
 const DEBUG_LOG_FILE = join(DEBUG_LOG_DIR, "provider-debug.log");
 const EXTENSION_SINGLETON_KEY = Symbol.for("pi-omlx-picker/loaded");
+const EXTENSION_DIR = dirname(fileURLToPath(import.meta.url));
+
+function loadDotenvFile(): { loaded: boolean; path: string; error?: string } {
+	const path = join(EXTENSION_DIR, ".env");
+	try {
+		const content = readFileSync(path, "utf8");
+		mergeDotenv(parseDotenv(content));
+		return { loaded: true, path };
+	} catch (err) {
+		const error = err as NodeJS.ErrnoException;
+		return { loaded: false, path, error: error.code ?? error.message };
+	}
+}
 
 interface State {
 	config: OmlxConfig | undefined;
@@ -51,7 +66,8 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		repeatedToolCallCount: 0,
 	};
 
-	debugLog("extension_load", { provider: PROVIDER });
+	const dotenv = loadDotenvFile();
+	debugLog("extension_load", { provider: PROVIDER, dotenv });
 	await initialRegister(pi, state);
 
 	pi.on("session_start", () => {
