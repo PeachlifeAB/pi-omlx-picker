@@ -1,0 +1,31 @@
+[tasks.test]
+description = "Run the pi-omlx-picker unit test suite. Exits non-zero on any regression."
+run = "npm test"
+
+[tasks.typecheck]
+description = "Run TypeScript type checking for extension, source, tests, and smoke scripts."
+run = "npm run typecheck"
+
+[tasks.verify]
+description = "Run all local non-live checks required before shipping."
+run = """
+npx @biomejs/biome check
+npm run typecheck
+npm test
+"""
+
+[tasks.format]
+description = "Fixes trivial issues"
+run = "npx @biomejs/biome check --write"
+
+[tasks."smoke:omlx"]
+description = "Run live OMLX smoke validation against OMLX_BASE_URL, including reasoning, non-thinking, and tool-flow checks."
+run = "npm run smoke:omlx"
+
+[tasks."verify:live"]
+description = "Run local checks plus live OMLX smoke validation. Requires a running OMLX server."
+run = """
+npm run typecheck
+npm test
+npm run smoke:omlx
+"""

@@ -1,0 +1,12 @@
+{
+	"root": true,
+	"files": {
+		"includes": ["src/**/*.ts", "!!**/references", "!!**/.*"]
+	},
+	"formatter": {
+		"enabled": true
+	},
+	"linter": {
+		"enabled": true
+	}
+}

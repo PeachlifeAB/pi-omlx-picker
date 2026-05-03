@@ -1,149 +1,335 @@
-const AUTOPLAN_STUB_PATTERNS = [
-	"starting with preamble",
-	"starting with preamble and context intake",
-	"running the full pipeline",
-	"let me run the full autoplan pipeline",
-	"let me run the full `/autoplan` pipeline",
-	"continue `/autoplan` now",
-	"continue /autoplan now",
-	"you are an autopilot reviewer for gstack projects",
-];
+import type { BoundaryGarbageDiagnosis } from "./boundary-garbage.ts";
 
-const AUTOPLAN_RECOVERY_MESSAGE =
-	"Continue `/autoplan` now. Do not restate that you are starting. Do not print the preamble. Execute the first concrete step immediately, and if a tool is needed, emit the tool call now.";
+const PREVIEW_CHARS = 240;
 
-const AUTOPLAN_NARRATION_PATTERNS = [
-	"```bash",
-	"phase 0:",
-	"### step 0:",
-	"git log -20 --oneline",
-	"git diff $base --stat",
-	"gh pr view --json",
-	"mkdir -p ~/.gstack/projects",
-];
+export const OMLX_INCOMPLETE_STOP_EVENT = "pi-omlx-picker:incomplete-stop";
 
-const AUTOPLAN_NARRATION_RECOVERY_MESSAGE =
-	"Continue `/autoplan` now. Do not narrate shell commands. Do not print fenced bash blocks, phases, or steps. Execute the next concrete action with Pi tool calls only, and emit the first tool call now.";
-
-export type AutoplanInvalidTurnReason = "empty" | "stub" | "narration";
-
-export function shouldRecoverAutoplanStub(message: unknown, toolResults: number, branchMessages: unknown[]): boolean {
-	if (toolResults > 0) return false;
-	if (!message || typeof message !== "object") return false;
-
-	const current = message as Record<string, unknown>;
-	if (current.role !== "assistant") return false;
-	if (current.stopReason !== "stop") return false;
-
-	const toolCalls = extractToolCalls(current.content);
-	if (toolCalls.length > 0) return false;
-
-	const text = extractText(current.content);
-	if (!text) return false;
-	const normalized = text.toLowerCase();
-	if (!AUTOPLAN_STUB_PATTERNS.some((pattern) => normalized.includes(pattern))) return false;
-
-	return hasAutoplanInvocation(branchMessages);
+export interface RepeatedToolCallFacts {
+	hit: boolean;
+	toolName?: string;
+	count?: number;
 }
 
-export function shouldRecoverAutoplanNarration(message: unknown, toolResults: number, branchMessages: unknown[]): boolean {
-	if (toolResults > 0) return false;
-	if (!message || typeof message !== "object") return false;
-
-	const current = message as Record<string, unknown>;
-	if (current.role !== "assistant") return false;
-	if (current.stopReason !== "stop") return false;
-
-	const toolCalls = extractToolCalls(current.content);
-	if (toolCalls.length > 0) return false;
-
-	const text = extractText(current.content);
-	if (!text) return false;
-	const normalized = text.toLowerCase();
-	if (!AUTOPLAN_NARRATION_PATTERNS.some((pattern) => normalized.includes(pattern))) return false;
-
-	return hasAutoplanInvocation(branchMessages);
+export interface ToolIntentStopFacts {
+	hit: boolean;
+	reason?: string;
 }
 
-export function getAutoplanRecoveryMessage(): string {
-	return AUTOPLAN_RECOVERY_MESSAGE;
+export interface IncompleteStopFacts {
+	version: 1;
+	provider: "omlx";
+	modelId?: string;
+	turnIndex?: number;
+	stopReason?: string;
+	toolResultCount: number;
+	toolsAvailable: boolean;
+	hasVisibleText: boolean;
+	hasThinking: boolean;
+	hasToolCalls: boolean;
+	textPreview?: string;
+	thinkingPreview?: string;
+	boundaryGarbage: {
+		hit: boolean;
+		inText: boolean;
+		inThinking: boolean;
+		hasProtocolLeak: boolean;
+	};
+	repeatedToolCall: RepeatedToolCallFacts;
+	toolIntentStop: ToolIntentStopFacts;
+	emptyStop: boolean;
+	autoRetryEligible: boolean;
+	turnKey: string;
 }
 
-export function getAutoplanNarrationRecoveryMessage(): string {
-	return AUTOPLAN_NARRATION_RECOVERY_MESSAGE;
+export interface ToolValidationErrorFacts {
+	hit: boolean;
+	toolName?: string;
+	preview?: string;
 }
 
-export function getAutoplanInvalidTurnReason(
-	message: unknown,
-	toolResults: number,
-	branchMessages: unknown[],
-): AutoplanInvalidTurnReason | undefined {
-	if (toolResults > 0) return undefined;
-	if (!hasAutoplanInvocation(branchMessages)) return undefined;
-	if (!message || typeof message !== "object") return undefined;
-
-	const current = message as Record<string, unknown>;
-	if (current.role !== "assistant") return undefined;
-	if (current.stopReason !== "stop") return undefined;
-
-	const toolCalls = extractToolCalls(current.content);
-	if (toolCalls.length > 0) return undefined;
-
-	const text = extractText(current.content).trim();
-	if (!text) return "empty";
-	if (shouldRecoverAutoplanNarration(message, toolResults, branchMessages)) return "narration";
-	if (shouldRecoverAutoplanStub(message, toolResults, branchMessages)) return "stub";
-	return undefined;
+export interface BuildIncompleteStopFactsInput {
+	message: unknown;
+	modelId?: string;
+	turnIndex?: number;
+	toolResultCount: number;
+	toolsAvailable?: boolean;
+	boundaryGarbage?: BoundaryGarbageDiagnosis;
+	repeatedToolCall?: RepeatedToolCallFacts;
 }
 
-export function getAutoplanFailureMessage(reason: AutoplanInvalidTurnReason): string {
-	switch (reason) {
-		case "empty":
-			return "OMLX completed the `/autoplan` request but returned no usable output. The model did not emit tool calls or visible progress.";
-		case "stub":
-			return "OMLX returned `/autoplan` preamble text instead of executing the workflow. This was treated as invalid output, not real progress.";
-		case "narration":
-			return "OMLX returned narrated shell commands for `/autoplan` instead of Pi tool calls. This was treated as invalid output, not real progress.";
+export interface IncompleteStopEventTarget {
+	emit?: (event: string, facts: IncompleteStopFacts) => unknown;
+}
+
+export function buildIncompleteStopFacts(
+	input: BuildIncompleteStopFactsInput,
+): IncompleteStopFacts | undefined {
+	if (!input.message || typeof input.message !== "object") return undefined;
+	const message = input.message as Record<string, unknown>;
+	if (message.role !== "assistant") return undefined;
+	if (message.stopReason !== "stop") return undefined;
+
+	const visibleText = extractTextByKinds(message.content, ["text"]).trim();
+	const thinkingText = extractTextByKinds(message.content, [
+		"thinking",
+		"reasoning",
+	]).trim();
+	const toolCalls = extractToolCalls(message.content);
+	const emptyStop =
+		visibleText.length === 0 &&
+		thinkingText.length === 0 &&
+		toolCalls.length === 0;
+	const toolsAvailable = input.toolsAvailable === true;
+	const actionlessStop =
+		emptyStop ||
+		(toolsAvailable &&
+			visibleText.length === 0 &&
+			toolCalls.length === 0 &&
+			thinkingText.length > 0);
+	const toolIntentStop =
+		toolsAvailable && toolCalls.length === 0
+			? detectToolIntentText(visibleText)
+			: { hit: false };
+	const boundaryGarbage = input.boundaryGarbage ?? {
+		hit: false,
+		inText: false,
+		inThinking: false,
+		hasProtocolLeak: false,
+	};
+	const repeatedToolCall = input.repeatedToolCall ?? { hit: false };
+
+	return {
+		version: 1,
+		provider: "omlx",
+		modelId: input.modelId,
+		turnIndex: input.turnIndex,
+		stopReason:
+			typeof message.stopReason === "string" ? message.stopReason : undefined,
+		toolResultCount: input.toolResultCount,
+		toolsAvailable,
+		hasVisibleText: visibleText.length > 0,
+		hasThinking: thinkingText.length > 0,
+		hasToolCalls: toolCalls.length > 0,
+		textPreview: visibleText ? visibleText.slice(0, PREVIEW_CHARS) : undefined,
+		thinkingPreview: thinkingText
+			? thinkingText.slice(0, PREVIEW_CHARS)
+			: undefined,
+		boundaryGarbage,
+		repeatedToolCall,
+		toolIntentStop,
+		emptyStop,
+		autoRetryEligible:
+			boundaryGarbage.hit || actionlessStop || toolIntentStop.hit,
+		turnKey: buildTurnKey({
+			modelId: input.modelId,
+			turnIndex: input.turnIndex,
+			stopReason:
+				typeof message.stopReason === "string" ? message.stopReason : undefined,
+			toolResultCount: input.toolResultCount,
+			hasVisibleText: visibleText.length > 0,
+			hasThinking: thinkingText.length > 0,
+			hasToolCalls: toolCalls.length > 0,
+			textPreview: visibleText.slice(0, 80),
+			thinkingPreview: thinkingText.slice(0, 80),
+		}),
+	};
+}
+
+export function isEmptyUnusableAssistantStop(
+	facts: IncompleteStopFacts,
+): boolean {
+	return (
+		facts.emptyStop &&
+		!facts.hasVisibleText &&
+		!facts.hasThinking &&
+		!facts.hasToolCalls
+	);
+}
+
+export function isActionlessUnusableAssistantStop(
+	facts: IncompleteStopFacts,
+): boolean {
+	return (
+		facts.emptyStop ||
+		(facts.toolsAvailable &&
+			!facts.hasVisibleText &&
+			!facts.hasToolCalls &&
+			facts.hasThinking)
+	);
+}
+
+export function detectToolIntentText(text: string): ToolIntentStopFacts {
+	const normalized = text.replace(/\s+/g, " ").trim().toLowerCase();
+	if (!normalized || normalized.length > 600) return { hit: false };
+
+	const intent = normalized.match(
+		/\b(let me|now let me|i(?:'ll| will| need to| am going to|'m going to)|i should)\b/,
+	);
+	if (!intent) return { hit: false };
+
+	const action = normalized.match(
+		/\b(write|edit|create|save|update|modify|inspect|read|run|execute|check|verify|search|fetch|open|delete|remove|add|patch)\b/,
+	);
+	if (!action) return { hit: false };
+
+	return {
+		hit: true,
+		reason: `${intent[1]}:${action[1]}`,
+	};
+}
+
+export function classifyActionlessStopRecovery(
+	facts: IncompleteStopFacts,
+	retryInFlight: boolean,
+): "none" | "retry" | "failed" {
+	if (!isActionlessUnusableAssistantStop(facts)) return "none";
+	return retryInFlight ? "failed" : "retry";
+}
+
+// Classify truly empty stop: no text, no thinking, no tool calls whatsoever.
+// A truly empty stop means the model produced zero output tokens.
+export function classifyTrulyEmptyStopRecovery(
+	facts: IncompleteStopFacts,
+	retryInFlight: boolean,
+): "none" | "retry" | "failed" {
+	if (!facts.emptyStop) return "none";
+	if (facts.hasVisibleText || facts.hasThinking || facts.hasToolCalls)
+		return "none";
+	return retryInFlight ? "failed" : "retry";
+}
+
+// Classify thinking-only stop: model produced thinking but stopped before visible text or tool call.
+// Unlike truly empty stops, these have N tokens of reasoning output — the model is
+// still active, just incomplete. Be patient, do NOT disable thinking in the steer.
+export function classifyThinkingOnlyStopRecovery(
+	facts: IncompleteStopFacts,
+	retryCount: number,
+	maxRetries = 16,
+): "none" | "retry" | "failed" {
+	if (!facts.toolsAvailable) return "none";
+	if (!facts.hasThinking) return "none";
+	if (facts.hasVisibleText || facts.hasToolCalls) return "none";
+	return retryCount >= maxRetries ? "failed" : "retry";
+}
+
+// Keep classifyEmptyStopRecovery as backward compat alias (same as classifyActionlessStopRecovery).
+export const classifyEmptyStopRecovery = classifyActionlessStopRecovery;
+
+export function classifyToolIntentStopRecovery(
+	facts: IncompleteStopFacts,
+	retryCount: number,
+	maxRetries = 2,
+): "none" | "retry" | "failed" {
+	if (!facts.toolIntentStop.hit) return "none";
+	if (!facts.toolsAvailable) return "none";
+	if (facts.hasToolCalls) return "none";
+	return retryCount >= maxRetries ? "failed" : "retry";
+}
+
+export function extractToolValidationError(
+	toolResults: unknown[],
+): ToolValidationErrorFacts {
+	for (const result of toolResults) {
+		if (!result || typeof result !== "object") continue;
+		const record = result as Record<string, unknown>;
+		if (record.isError !== true) continue;
+
+		const text = extractToolResultText(record);
+		const validationHit =
+			/\bValidation failed for tool\b/i.test(text) ||
+			/\bReceived arguments:\b/i.test(text) ||
+			/\bmust have required properties\b/i.test(text);
+		if (!validationHit) continue;
+
+		const toolName =
+			typeof record.toolName === "string"
+				? record.toolName
+				: parseToolNameFromValidationText(text);
+		return {
+			hit: true,
+			toolName,
+			preview: text.slice(0, PREVIEW_CHARS),
+		};
+	}
+	return { hit: false };
+}
+
+export function classifyToolValidationRecovery(
+	facts: IncompleteStopFacts,
+	validationError: ToolValidationErrorFacts | undefined,
+	retryCount: number,
+	maxRetries = 2,
+): "none" | "retry" | "failed" {
+	if (!validationError?.hit) return "none";
+	if (facts.toolResultCount > 0) return "none";
+	if (facts.hasToolCalls || facts.hasThinking) return "none";
+	if (!facts.emptyStop) return "none";
+	return retryCount >= maxRetries ? "failed" : "retry";
+}
+
+export function emitIncompleteStopFactsEvent(
+	events: IncompleteStopEventTarget | undefined,
+	facts: IncompleteStopFacts,
+	onError?: (err: unknown) => void,
+): boolean {
+	if (typeof events?.emit !== "function") return false;
+	try {
+		const result = events.emit(OMLX_INCOMPLETE_STOP_EVENT, facts);
+		if (result && typeof (result as Promise<unknown>).then === "function") {
+			(result as Promise<unknown>).catch((err) => onError?.(err));
+		}
+		return true;
+	} catch (err) {
+		onError?.(err);
+		return false;
 	}
 }
 
-export function getLatestAutoplanInvocationKey(messages: unknown[]): string | undefined {
-	for (let index = messages.length - 1; index >= 0; index -= 1) {
-		const message = messages[index];
-		if (!message || typeof message !== "object") continue;
-		if ((message as Record<string, unknown>).role !== "user") continue;
-		const text = extractText((message as Record<string, unknown>).content);
-		if (!text.includes("<skill name=\"gstack-autoplan\"")) continue;
-		return `${index}:${text.length}`;
-	}
-	return undefined;
-}
-
-function hasAutoplanInvocation(messages: unknown[]): boolean {
-	return typeof getLatestAutoplanInvocationKey(messages) === "string";
-}
-
-function findLatestUserText(messages: unknown[]): string | undefined {
-	for (let index = messages.length - 1; index >= 0; index -= 1) {
-		const message = messages[index];
-		if (!message || typeof message !== "object") continue;
-		const role = (message as Record<string, unknown>).role;
-		if (role !== "user") continue;
-		const text = extractText((message as Record<string, unknown>).content);
-		if (text) return text;
-	}
-	return undefined;
-}
-
-function extractText(content: unknown): string {
+function extractToolResultText(record: Record<string, unknown>): string {
+	const content = record.content;
 	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	return content
+		.map((item) => {
+			if (typeof item === "string") return item;
+			if (!item || typeof item !== "object") return "";
+			const itemRecord = item as Record<string, unknown>;
+			if (typeof itemRecord.text === "string") return itemRecord.text;
+			if (typeof itemRecord.content === "string") return itemRecord.content;
+			return "";
+		})
+		.filter((text) => text.length > 0)
+		.join("\n");
+}
+
+function parseToolNameFromValidationText(text: string): string | undefined {
+	const match = text.match(/Validation failed for tool "([^"]+)"/i);
+	return match?.[1];
+}
+
+function buildTurnKey(parts: Record<string, unknown>): string {
+	return Buffer.from(JSON.stringify(parts)).toString("base64url").slice(0, 96);
+}
+
+function extractTextByKinds(content: unknown, kinds: string[]): string {
+	if (typeof content === "string") return kinds.includes("text") ? content : "";
 	if (!Array.isArray(content)) return "";
 	return content
 		.map((item) => {
 			if (!item || typeof item !== "object") return "";
 			const record = item as Record<string, unknown>;
-			return typeof record.text === "string" ? record.text : "";
+			if (typeof record.type !== "string" || !kinds.includes(record.type))
+				return "";
+			if (typeof record.text === "string") return record.text;
+			if (
+				(record.type === "thinking" || record.type === "reasoning") &&
+				typeof record.thinking === "string"
+			) {
+				return record.thinking;
+			}
+			return "";
 		})
+		.filter((text) => text.length > 0)
 		.join("\n");
 }
 
@@ -153,7 +339,9 @@ function extractToolCalls(content: unknown): string[] {
 		.map((item) => {
 			if (!item || typeof item !== "object") return undefined;
 			const record = item as Record<string, unknown>;
-			return record.type === "toolCall" && typeof record.name === "string" ? record.name : undefined;
+			return record.type === "toolCall" && typeof record.name === "string"
+				? record.name
+				: undefined;
 		})
 		.filter((item): item is string => typeof item === "string");
 }

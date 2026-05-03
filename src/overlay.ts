@@ -10,23 +10,34 @@ export interface OverlayResult {
 	stats?: OverlayStats;
 }
 
-const AUTOPLAN_OVERLAY_NAME = "gstack-autoplan";
+export interface OverlayOptions {
+	toolsAvailable: boolean;
+}
 
-export function applyOmlxCompatibilityOverlay(messages: unknown[]): OverlayResult {
+const OMLX_AGENT_CONTRACT_MARKER =
+	"[OMLX agent contract applied by pi-omlx-picker.]";
+const OMLX_AGENT_CONTRACT_NAME = "inline-skill-agent-contract";
+
+export function applyOmlxCompatibilityOverlay(
+	messages: unknown[],
+	options: OverlayOptions = { toolsAvailable: true },
+): OverlayResult {
+	if (!options.toolsAvailable) return { messages };
+
 	const beforeChars = estimateMessagesChars(messages);
-	const targetIndex = findLatestAutoplanSkillIndex(messages);
+	const targetIndex = findLatestInlineSkillIndex(messages);
 	if (targetIndex === -1) return { messages };
 
 	const target = messages[targetIndex];
 	const text = getMessageText(target);
 	if (!text) return { messages };
-	if (text.includes("[OMLX compatibility overlay applied by pi-omlx-picker.]")) {
+	if (text.includes(OMLX_AGENT_CONTRACT_MARKER)) {
 		return { messages };
 	}
 
 	const overlaid = messages.map((message, index) => {
 		if (index !== targetIndex) return message;
-		return replaceMessageText(message, buildAutoplanOverlayText(text));
+		return replaceMessageText(message, addAgentContract(text));
 	});
 
 	return {
@@ -35,44 +46,33 @@ export function applyOmlxCompatibilityOverlay(messages: unknown[]): OverlayResul
 			beforeChars,
 			afterChars: estimateMessagesChars(overlaid),
 			replacedMessages: 1,
-			overlay: AUTOPLAN_OVERLAY_NAME,
+			overlay: OMLX_AGENT_CONTRACT_NAME,
 		},
 	};
 }
 
-function buildAutoplanOverlayText(text: string): string {
-	const tagMatch = text.match(/^<skill name="([^"]+)" location="([^"]+)">/);
-	const name = tagMatch?.[1] ?? AUTOPLAN_OVERLAY_NAME;
-	const location = tagMatch?.[2] ?? "unknown";
-	const description = text.match(/^description:\s*\|?\s*\n([\s\S]*?)\n---/m)?.[1];
+function addAgentContract(text: string): string {
+	const contract = [
+		OMLX_AGENT_CONTRACT_MARKER,
+		`Provider contract:`,
+		`- If an action requires a tool, emit the Pi tool call instead of describing the action.`,
+		`- If you say you will inspect, edit, run, fetch, or verify something, emit the tool call now.`,
+		`- End each assistant turn with either normal visible text or a Pi tool call, not protocol tags alone.`,
+		`- Do not add task-specific recovery policy. Follow the referenced skill's own instructions.`,
+	].join("\n");
 
-	return [
-		`<skill name="${name}" location="${location}">`,
-		`[OMLX compatibility overlay applied by pi-omlx-picker.]`,
-		`Use the referenced skill file as authoritative if more detail is needed.`,
-		description ? `Summary:\n${normalizeWhitespace(description).slice(0, 500)}` : undefined,
-		`Execution contract:`,
-		`- Run the actual ${name.replace(/^gstack-/, "")} workflow.`,
-		`- Treat this turn as /no_think. Do not enter a hidden thinking phase before acting.`,
-		`- Do not print the preamble.`,
-		`- Do not narrate shell commands, phases, or steps.`,
-		`- Do not emit fenced bash blocks.`,
-		`- Use Pi tool calls for shell, file, and git actions.`,
-		`- Start with the first concrete tool call immediately.`,
-		`- If no tool is needed for a step, continue with the next concrete action instead of narrating intent.`,
-		`/no_think`,
-		`</skill>`,
-	]
-		.filter((part): part is string => typeof part === "string")
-		.join("\n\n");
+	if (text.includes("</skill>")) {
+		return text.replace("</skill>", `\n\n${contract}\n</skill>`);
+	}
+	return `${text}\n\n${contract}`;
 }
 
-function findLatestAutoplanSkillIndex(messages: unknown[]): number {
+function findLatestInlineSkillIndex(messages: unknown[]): number {
 	for (let index = messages.length - 1; index >= 0; index -= 1) {
 		if (getMessageRole(messages[index]) !== "user") continue;
 		const text = getMessageText(messages[index]);
 		if (!text) continue;
-		if (!text.includes(`<skill name="${AUTOPLAN_OVERLAY_NAME}"`)) continue;
+		if (!text.includes('<skill name="') || !text.includes("</skill>")) continue;
 		return index;
 	}
 	return -1;
@@ -120,13 +120,8 @@ function replaceMessageText(message: unknown, text: string): unknown {
 }
 
 function estimateMessagesChars(messages: unknown[]): number {
-	return messages.reduce<number>((sum, message) => sum + (getMessageText(message)?.length ?? 0), 0);
-}
-
-function normalizeWhitespace(text: string): string {
-	return text
-		.split("\n")
-		.map((line) => line.trim())
-		.filter((line) => line.length > 0)
-		.join("\n");
+	return messages.reduce<number>(
+		(sum, message) => sum + (getMessageText(message)?.length ?? 0),
+		0,
+	);
 }

@@ -1,99 +1,207 @@
-# Design System — pi-omlx-picker
+# pi-omlx-picker Design
 
-## Product Context
-- **What this is:** A Pi extension that makes OMLX-backed models feel native inside `pi-mono`, especially during agentic coding flows and gstack skill execution.
-- **Who it's for:** The Pi and broader AI builder community, especially terminal-first power users who want local control without losing polish.
-- **Space/industry:** Developer tools, terminal UX, coding agents.
-- **Project type:** Terminal extension, provider integration, lightweight but high-signal developer UX.
+## Purpose
 
-## Aesthetic Direction
-- **Direction:** Native Terminal Precision
-- **Decoration level:** Minimal
-- **Mood:** Calm, exact, trustworthy under failure. It should feel lighter than Claude Code, cleaner than most AI CLIs, and as unsurprising as Pi’s built-in providers.
-- **Reference posture:** Claude Code and Codex CLI for seriousness, Pi native providers for integration feel, but stripped down for minimalists.
+`pi-omlx-picker` is now an OMLX metadata bridge for Pi. It registers an `omlx`
+provider, projects validated OMLX model settings into Pi's native model system,
+and keeps diagnostics available through one visible command: `/omlx-status`.
 
-## User Experience Principles
-- **No silent failure:** If OMLX completed but produced unusable output, say so plainly in-band.
-- **One truth at a time:** The UI should explain the current state, not narrate internals.
-- **Invalid output is not progress:** Preamble parroting, fenced bash with no tool calls, and empty completions are failure states, not assistant progress.
-- **Automatic first, explicit second:** Try the obvious recovery once, then surface a crisp next action.
-- **Provider-specific behavior, native presentation:** OMLX may need compatibility overlays, but the user experience should still feel like normal Pi.
+It owns:
 
-## Terminal UX Contract
-- **Healthy request:** user prompt → spinner → assistant tool call or real text output.
-- **Compacted request:** show a low-noise status hint that context was compacted for OMLX compatibility.
-- **Invalid first turn:** replace bogus assistant progress with a short system-style explanation:
-  - `OMLX returned non-executable autoplan output. Retrying with compatibility overlay.`
-- **Invalid retry:** surface a hard, legible stop:
-  - `OMLX completed the request but returned no usable output for /autoplan.`
-- **Recommended next actions:** always attach one immediate path:
-  - retry once more with stronger overlay
-  - switch model
-  - inspect provider log path
-  - continue without `/autoplan`
+- OMLX model discovery from `/v1/models/status` with `/v1/models` fallback
+- local `model_settings.json` overlay from OMLX's documented `ModelSettings`
+- Pi provider config mapping for fields Pi actually supports
+- native Pi thinking-level selection from OMLX thinking metadata
+- OMLX/Pi request shaping and bounded provider-defect recovery
+- per-model runtime metrics and optional Pi bridge task budget tracking
+- structured debug logs, footer status, and `/omlx-status`
 
-## Status Language
-- **Ready:** `OMLX ready`
-- **Compaction:** `OMLX compacted context`
-- **Recovery:** `OMLX recovering invalid autoplan output`
-- **Hard failure:** `OMLX model returned empty completion`
+It does not own:
 
-All status copy should be one line, sentence case, no hype, no apology.
+- model switching UI; native Pi `/model` owns selection
+- unsupported provider fields in Pi
+- task completion policy or workflow semantics
+- OMLX server-side settings management
 
-## Typography
-- **Display/Hero:** Inherit terminal font. Do not introduce a branded display face inside Pi.
-- **Body:** Inherit terminal font. The design work is hierarchy and wording, not font override.
-- **UI/Labels:** Terminal font with disciplined capitalization and spacing.
-- **Data/Tables:** Monospace with clear alignment. Prefer tabular presentation for logs, counts, and state.
-- **Code:** Terminal monospace, inherited.
-- **Scale:** Three visual levels only:
-  - primary message
-  - secondary status/help text
-  - de-emphasized diagnostics
+## Source Boundaries
 
-## Color
-- **Approach:** Restrained
-- **Primary:** `#6FC7D8` steel-cyan, for active OMLX state and compatibility hints
-- **Secondary:** `#9FB3C8` cool slate-blue, for neutral provider metadata
-- **Neutrals:** `#E8ECEF` text, `#B6BEC7` muted text, `#1B1F24` background, `#111417` deeper surface
-- **Semantic:** success `#6FB98F`, warning `#D8A657`, error `#C96B6B`, info `#6FC7D8`
-- **Dark mode:** Default posture. Keep saturation disciplined. Error red should feel surgical, not loud.
+OMLX documented settings are listed in
+[docs/OMLX_MODEL_SETTINGS.md](docs/OMLX_MODEL_SETTINGS.md). That document is
+validated against the OMLX source and separates true OMLX fields from bridge-only
+fields such as `task_budget_tokens`.
 
-## Spacing
-- **Base unit:** 1 terminal row / 2-space horizontal rhythm
-- **Density:** Compact
-- **Scale:** tight inline state, single blank line before major state change, no stacked padding blocks
+Pi provider model support was checked in `references/pi-mono`:
 
-## Layout
-- **Approach:** Grid-disciplined
-- **Grid:** Single column conversation flow, with optional one-line status/footer augmentation
-- **Max content width:** Match Pi conversation width. Do not create wide pseudo-panels inside the transcript.
-- **Border radius:** None in terminal surfaces. If a widget is rendered, keep geometry square and structural.
+- `ProviderModelConfig` supports `id`, `name`, `api`, `reasoning`, `input`,
+  `cost`, `contextWindow`, `maxTokens`, `headers`, and `compat`.
+- Pi extensions can call `getThinkingLevel()` and `setThinkingLevel()`.
+- Pi's OpenAI completions compat owns the actual thinking budget and
+  `qwen-chat-template` request shaping.
 
-## Motion
-- **Approach:** Minimal-functional
-- **Easing:** N/A in terminal context
-- **Duration:** Use existing Pi spinner/progress behavior only. No decorative animation.
+## Data Flow
 
-## Implementation Guidance
-- Classify these as invalid assistant turns during inline gstack execution on OMLX:
-  - empty completion
-  - preamble-only completion
-  - fenced bash narration without tool calls
-- Prefer pre-request compatibility overlays over post-hoc repair when a skill prompt is known to be problematic.
-- Use footer or status widgets for background provider state, not chat spam.
-- If a recovery message is injected, it should read like a system intervention, not like another user typing blindly.
-- Never leave the transcript ending in an empty assistant turn with no explanation.
+```text
+OMLX /v1/models/status or /v1/models
+  -> parse catalog
+  -> apply ~/.omlx/model_settings.json overlay
+  -> derive OmlxModel bridge metadata
+  -> register Pi provider "omlx"
+  -> native /model lists OMLX models
+```
 
-## UX Review Findings
-- The current broken path damages trust more than it damages throughput.
-- A narrated preamble looks like progress but is actually model failure. That is the worst possible ambiguity.
-- Empty completions must be rendered as explicit provider failures, not absence.
-- The extension should optimize for legibility under failure, because that is where “native feel” is won or lost.
+Only supported fields are copied into Pi provider config:
 
-## Decisions Log
-| Date | Decision | Rationale |
-|------|----------|-----------|
-| 2026-04-20 | Adopted `Native Terminal Precision` as the design direction | The extension should feel like Pi’s built-in providers, not like a custom experiment. |
-| 2026-04-20 | Prioritized failure legibility over decorative UX | Silent or fake-progress failures are the main trust break in the current OMLX path. |
-| 2026-04-20 | Kept typography inherited from the terminal | In Pi, hierarchy and wording matter more than custom font identity. |
+- `display_name` -> `name`
+- OMLX id -> `id`
+- `enable_thinking` / `chat_template_kwargs.enable_thinking` -> `reasoning`
+- `model_type_override: "vlm"` -> `input: ["text", "image"]`
+- `max_context_window` -> `contextWindow`
+- `max_tokens` -> `maxTokens`
+
+The provider sets Pi's OpenAI-compatible `compat.maxTokensField` to
+`max_tokens`, matching OMLX `ChatCompletionRequest`. This keeps Pi's model
+output budget visible to OMLX even when a model has no local `max_tokens`
+setting.
+
+Everything else stays in extension state for `/omlx-status`, diagnostics, or
+bridge-owned runtime behavior.
+
+## Native Thinking
+
+Pi owns thinking levels and computed budgets. The bridge only chooses the native
+Pi level that best matches OMLX settings:
+
+1. `enable_thinking: false` or `chat_template_kwargs.enable_thinking: false` -> `off`
+2. `thinking_budget_tokens: 0` -> `off`
+3. `chat_template_kwargs.reasoning_effort` matching a Pi level -> that level
+4. positive `thinking_budget_tokens` -> nearest Pi default budget level
+5. `enable_thinking: true` -> `medium`
+6. `thinking_budget_enabled: true` -> `medium`
+
+The bridge applies this on `session_start`, `model_select`, and `/omlx-status`.
+It does not invent non-Pi levels such as `max` or `ultra`.
+
+## Runtime Hooks
+
+```text
+session_start
+  -> reset recovery counters, active request, task budget
+  -> apply OMLX-derived Pi thinking level if active model is OMLX
+
+model_select
+  -> reset active request and task budget
+  -> apply OMLX-derived Pi thinking level
+  -> update footer only for active OMLX or actionable error
+
+context
+  -> remove visible /omlx-status messages from provider context
+  -> compact pathological inline skill history
+  -> remove protocol-only assistant garbage
+  -> truncate tool results using max_tool_result_tokens when configured
+
+before_provider_request
+  -> apply compatibility overlay
+  -> preserve Pi-owned thinking policy for capable models
+  -> disable OMLX thinking explicitly for incapable/off models
+  -> disable OMLX thinking and thinking preservation on recovery turns
+  -> record request start for tokens/sec
+
+message_end
+  -> extract output tokens from usage variants
+  -> record last sample and rolling last 5 samples
+  -> accumulate optional task budget usage
+  -> inject hidden 20% and 5% task-budget steers when configured
+
+turn_end
+  -> bounded recovery for boundary garbage, invalid tool calls, empty stops,
+     thinking-only stops, and visible tool-intent stops
+  -> emit pi-omlx-picker:incomplete-stop facts
+```
+
+## Command UX
+
+Public command surface:
+
+- `/omlx-status`
+
+Removed public commands:
+
+- `/omlx`
+- `/omlx-refresh`
+- `/omlx-doctor`
+
+`/omlx-status` silently refreshes the catalog before rendering. If refresh fails,
+it renders the last known catalog plus the error.
+
+Status sections:
+
+- Connection: API root, provider registration, model count, settings path,
+  last refresh, last error
+- Session: session file/id/leaf, message and token counts, last assistant stop
+  diagnosis, and recent anomalies
+- Active model: display name, raw id, alias, description, text/image capability
+- Pi mapping: provider name, reasoning enabled, current Pi thinking level,
+  OMLX-derived thinking source, thinking format, context window, max tokens
+- OMLX settings: identity, thinking, limits, sampling, DFlash, SpecPrefill,
+  TurboQuant, lifecycle, and bridge task budget
+- Runtime: last tokens/sec, rolling tokens/sec, output tokens, task budget, and
+  last assistant stop token ratios against `max_tokens`/`max_context_window`
+- Recovery: boundary garbage, empty/actionless stop, tool validation, visible
+  tool intent, recovery thinking override availability, session recovery
+  counts, debug log path
+
+## Recovery Contract
+
+The bridge keeps recovery generic and bounded:
+
+- boundary protocol garbage after tool results: retry once
+- empty or thinking-only assistant stop when tools are available: retry once
+- visible tool-intent stop such as "let me write/edit/run..." with no Pi tool
+  call: retry twice
+- Pi tool-validation failure followed by an empty/tool-less stop: retry up to the configured bound
+- repeated identical tool calls: warn through the UI
+
+Recovery turns are delivered as hidden Pi steer messages. For OMLX models, the
+bridge sends `thinking_budget=0` and overrides
+`chat_template_kwargs.enable_thinking=false` and `preserve_thinking=false` on
+those retry requests. OMLX `forced_ct_kwargs` can block the chat-template keys,
+so `/omlx-status` and debug logs surface that explicitly; `thinking_budget=0`
+remains a request-level budget override in OMLX source.
+
+It publishes normalized facts on the Pi event bus as
+`pi-omlx-picker:incomplete-stop`. Facts are bounded and exclude raw branch
+messages.
+
+## Files
+
+| File | Responsibility |
+| --- | --- |
+| `index.ts` | Extension lifecycle, commands, hooks, footer, status refresh |
+| `src/catalog.ts` | OMLX catalog parsing and local settings projection |
+| `src/provider.ts` | `OmlxModel` -> Pi provider config |
+| `src/native-thinking.ts` | OMLX metadata -> native Pi thinking level |
+| `src/thinking.ts` | OMLX request disablement when thinking is not allowed |
+| `src/status.ts` | `/omlx-status` rendering |
+| `src/session-diagnostics.ts` | active Pi session trail and stop diagnostics |
+| `src/performance.ts` | output-token extraction and tokens/sec samples |
+| `src/task-budget.ts` | optional Pi bridge task budget tracking |
+| `src/context.ts` | context cleanup, skill compaction, tool-result truncation |
+| `src/overlay.ts` | provider-neutral agent contract overlay |
+| `src/recovery.ts` | incomplete-stop facts and recovery classifiers |
+| `src/recovery-readiness.ts` | recovery override capability derived from forced chat-template keys |
+| `src/boundary-garbage.ts` | protocol-only garbage detection |
+| `src/config.ts` | OMLX env config loading and URL normalization |
+| `scripts/smoke-live-omlx.ts` | live OMLX smoke validation |
+
+## Observability
+
+Logs are newline-delimited JSON at:
+
+```text
+~/.pi/packages/pi-omlx-picker/log/provider-debug.log
+```
+
+Important log kinds include catalog refresh, local settings projection,
+native-thinking application, context compaction, provider request summaries,
+assistant stop diagnosis, performance samples, task-budget warnings, and
+recovery decisions.

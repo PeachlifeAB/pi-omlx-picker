@@ -3,12 +3,13 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Pi extension that discovers OMLX models dynamically and lets you pick one.",
+  "description": "Pi extension that maps OMLX model settings into native Pi model metadata.",
   "license": "MIT",
-  "scripts": {
-    "test": "node --import tsx --test 'test/*.test.ts'",
-    "typecheck": "tsc --noEmit"
-  },
+	"scripts": {
+		"test": "node --import tsx --test 'test/*.test.ts'",
+		"smoke:omlx": "tsx scripts/smoke-live-omlx.ts",
+		"typecheck": "tsc --noEmit"
+	},
   "pi": {
     "extensions": [
       "./index.ts"
