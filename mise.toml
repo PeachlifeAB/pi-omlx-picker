@@ -29,3 +29,11 @@ npm run typecheck
 npm test
 npm run smoke:omlx
 """
+
+[tasks."debug:omlx"]
+description = "Print shell-visible OMLX config, model path, template, log, and cache diagnostics. Pass model names after -- to narrow output."
+run = "npm run debug:omlx --"
+
+[tasks."debug:pi"]
+description = "Print shell-visible Pi install, config, session, log, and cache diagnostics. Pass install/config/sessions/logs/cache after -- to narrow output."
+run = "npm run debug:pi --"

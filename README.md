@@ -83,6 +83,8 @@ OMLX error.
 
 ## Debugging
 
+Start with [docs/DEBUG.md](docs/DEBUG.md) for the triage order and first checkpoints.
+
 Structured logs are written to:
 
 ```text

@@ -112,6 +112,43 @@ test("compactOmlxContext removes assistant protocol leaks before provider retry"
 	assert.equal((result.messages[2] as Record<string, unknown>).customType, "omlx-boundary-recovery");
 });
 
+test("compactOmlxContext removes aborted assistant fragments before provider retry", () => {
+	const messages = [
+		{ role: "user", content: [{ type: "text", text: "continue" }] },
+		{
+			role: "assistant",
+			stopReason: "aborted",
+			content: [
+				{ type: "thinking", thinking: "I was halfway through the previous model's plan." },
+				{ type: "text", text: "Partial visible answer" },
+			],
+		},
+		{ role: "user", content: [{ type: "text", text: "take over from here" }] },
+	];
+
+	const result = compactOmlxContext(messages);
+	assert.ok(result.stats);
+	assert.equal(result.stats?.sanitizedAbortedMessages, 1);
+	assert.equal(result.messages.length, 2);
+	assert.equal((result.messages[0] as Record<string, unknown>).role, "user");
+	assert.equal((result.messages[1] as Record<string, unknown>).role, "user");
+});
+
+test("compactOmlxContext keeps aborted assistant messages that contain tool calls", () => {
+	const messages = [
+		{ role: "user", content: [{ type: "text", text: "continue" }] },
+		{
+			role: "assistant",
+			stopReason: "aborted",
+			content: [{ type: "toolCall", name: "read", id: "call-1", arguments: { path: "README.md" } }],
+		},
+	];
+
+	const result = compactOmlxContext(messages);
+	assert.equal(result.stats, undefined);
+	assert.equal(result.messages, messages);
+});
+
 test("compactOmlxContext truncates oversized tool results using OMLX max_tool_result_tokens", () => {
 	const longToolResult = `start ${"x".repeat(1000)} end`;
 	const messages = [

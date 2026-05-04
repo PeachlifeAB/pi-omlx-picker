@@ -1248,7 +1248,16 @@ async function initialRegister(pi: ExtensionAPI, state: State): Promise<void> {
 	state.lastRefreshAt = new Date().toISOString();
 	state.lastError = undefined;
 	state.lastErrorAt = undefined;
-	pi.registerProvider(PROVIDER, toProviderConfig(config.apiRoot, config.apiKeyEnvVar, models));
+	pi.registerProvider(PROVIDER, toProviderConfig(config.apiRoot, config.apiKeyEnvVar, models, (event) => {
+		debugLog("stream_first_delta_timeout", {
+			model: event.model,
+			timeoutMs: event.timeoutMs,
+			attempt: event.attempt,
+			maxAttempts: event.maxAttempts,
+			final: event.final,
+			correlationId: state.activeCorrelationId,
+		});
+	}));
 	state.registered = true;
 }
 
@@ -1313,7 +1322,16 @@ async function refresh(
 		return;
 	}
 
-	pi.registerProvider(PROVIDER, toProviderConfig(config.apiRoot, config.apiKeyEnvVar, models));
+	pi.registerProvider(PROVIDER, toProviderConfig(config.apiRoot, config.apiKeyEnvVar, models, (event) => {
+		debugLog("stream_first_delta_timeout", {
+			model: event.model,
+			timeoutMs: event.timeoutMs,
+			attempt: event.attempt,
+			maxAttempts: event.maxAttempts,
+			final: event.final,
+			correlationId: state.activeCorrelationId,
+		});
+	}));
 	state.registered = true;
 
 	const msg = `omlx: ${models.length} model${models.length === 1 ? "" : "s"}`;

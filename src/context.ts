@@ -13,6 +13,7 @@ export interface ContextCompactionStats {
 	compactedSkillMessages: number;
 	compactedLargeMessages: number;
 	sanitizedProtocolMessages: number;
+	sanitizedAbortedMessages: number;
 	truncatedToolResultMessages: number;
 }
 
@@ -45,6 +46,14 @@ export function compactOmlxContext(
 	if (sanitizedProtocolMessages > 0) {
 		messages = protocolCleanedMessages;
 	}
+	const abortedCleanedMessages = messages.filter(
+		(message) => !isAbortedAssistantMessage(message),
+	);
+	const sanitizedAbortedMessages =
+		messages.length - abortedCleanedMessages.length;
+	if (sanitizedAbortedMessages > 0) {
+		messages = abortedCleanedMessages;
+	}
 	const toolResultTruncation = truncateToolResults(
 		messages,
 		opts.maxToolResultTokens,
@@ -61,6 +70,7 @@ export function compactOmlxContext(
 	) {
 		if (
 			sanitizedProtocolMessages > 0 ||
+			sanitizedAbortedMessages > 0 ||
 			toolResultTruncation.modifiedMessages > 0
 		) {
 			return {
@@ -69,10 +79,13 @@ export function compactOmlxContext(
 					beforeChars: originalChars,
 					afterChars: beforeChars,
 					modifiedMessages:
-						sanitizedProtocolMessages + toolResultTruncation.modifiedMessages,
+						sanitizedProtocolMessages +
+						sanitizedAbortedMessages +
+						toolResultTruncation.modifiedMessages,
 					compactedSkillMessages: 0,
 					compactedLargeMessages: 0,
 					sanitizedProtocolMessages,
+					sanitizedAbortedMessages,
 					truncatedToolResultMessages: toolResultTruncation.modifiedMessages,
 				},
 			};
@@ -90,7 +103,9 @@ export function compactOmlxContext(
 			? repeatedSkillIndexes[repeatedSkillIndexes.length - 1]
 			: -1;
 	let modifiedMessages =
-		sanitizedProtocolMessages + toolResultTruncation.modifiedMessages;
+		sanitizedProtocolMessages +
+		sanitizedAbortedMessages +
+		toolResultTruncation.modifiedMessages;
 	let compactedSkillMessages = 0;
 	let compactedLargeMessages = 0;
 
@@ -159,6 +174,7 @@ export function compactOmlxContext(
 			compactedSkillMessages,
 			compactedLargeMessages,
 			sanitizedProtocolMessages,
+			sanitizedAbortedMessages,
 			truncatedToolResultMessages: toolResultTruncation.modifiedMessages,
 		},
 	};
@@ -240,6 +256,26 @@ function isAssistantProtocolLeakMessage(message: unknown): boolean {
 	if (getMessageRole(message) !== "assistant") return false;
 	const text = getMessageText(message);
 	return typeof text === "string" && hasProtocolMarkupLeak(text);
+}
+
+function isAbortedAssistantMessage(message: unknown): boolean {
+	if (getMessageRole(message) !== "assistant") return false;
+	if (!message || typeof message !== "object") return false;
+	const current = message as Record<string, unknown>;
+	if (current.stopReason !== "aborted") return false;
+	return !messageHasToolCall(message);
+}
+
+function messageHasToolCall(message: unknown): boolean {
+	if (!message || typeof message !== "object") return false;
+	const content = (message as Record<string, unknown>).content;
+	return (
+		Array.isArray(content) &&
+		content.some((item) => {
+			if (!item || typeof item !== "object") return false;
+			return (item as Record<string, unknown>).type === "toolCall";
+		})
+	);
 }
 
 function getMessageText(message: unknown): string | undefined {
