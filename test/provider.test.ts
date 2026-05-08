@@ -17,22 +17,26 @@ test("toProviderConfig marks only explicit thinking_default true as reasoning ca
 	assert.deepEqual(config.models?.[0]?.compat, {
 		supportsDeveloperRole: false,
 		supportsReasoningEffort: false,
+		supportsLongCacheRetention: true,
 		maxTokensField: "max_tokens",
 		thinkingFormat: "qwen-chat-template",
 	});
 	assert.deepEqual(config.models?.[1]?.compat, {
 		supportsDeveloperRole: false,
 		supportsReasoningEffort: false,
+		supportsLongCacheRetention: true,
 		maxTokensField: "max_tokens",
 	});
 	assert.deepEqual(config.models?.[2]?.compat, {
 		supportsDeveloperRole: false,
 		supportsReasoningEffort: false,
+		supportsLongCacheRetention: true,
 		maxTokensField: "max_tokens",
 	});
 	assert.deepEqual(config.models?.[3]?.compat, {
 		supportsDeveloperRole: false,
 		supportsReasoningEffort: false,
+		supportsLongCacheRetention: true,
 		maxTokensField: "max_tokens",
 	});
 });

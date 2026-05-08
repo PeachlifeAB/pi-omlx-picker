@@ -59,6 +59,7 @@ function toProviderModel(m: OmlxModel): ProviderModelConfig {
 	const compat = {
 		supportsDeveloperRole: false,
 		supportsReasoningEffort: false,
+		supportsLongCacheRetention: true,
 		maxTokensField: "max_tokens" as const,
 		...(reasoning ? { thinkingFormat: "qwen-chat-template" as const } : {}),
 	};
