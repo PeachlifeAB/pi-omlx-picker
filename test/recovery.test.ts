@@ -205,6 +205,33 @@ test("classifyToolValidationRecovery prefers validation recovery after empty sto
 	assert.equal(classifyToolValidationRecovery({ ...empty, turnIndex: 24, turnKey: `${empty.turnKey}-third` }, validation, 2), "failed");
 });
 
+test("classifyToolValidationRecovery retries when model produces only thinking after validation error", () => {
+	const thinkingOnly = buildIncompleteStopFacts({
+		modelId: "opus",
+		turnIndex: 22,
+		toolResultCount: 0,
+		toolsAvailable: true,
+		message: {
+			role: "assistant",
+			stopReason: "stop",
+			content: [{ type: "thinking", thinking: "I need to call the read tool with the correct path argument." }],
+		},
+	});
+	const validation = {
+		hit: true,
+		toolName: "read",
+		preview: "Validation failed for tool \"read\":\n  - path: must have required properties path\n\nReceived arguments:\n{\"file\": \"/some/path\"}",
+	};
+
+	assert.ok(thinkingOnly);
+	assert.equal(thinkingOnly.hasThinking, true);
+	assert.equal(thinkingOnly.hasVisibleText, false);
+	assert.equal(thinkingOnly.hasToolCalls, false);
+	assert.equal(classifyToolValidationRecovery(thinkingOnly, validation, 0), "retry");
+	assert.equal(classifyToolValidationRecovery({ ...thinkingOnly, turnIndex: 23, turnKey: `${thinkingOnly.turnKey}-next` }, validation, 1), "retry");
+	assert.equal(classifyToolValidationRecovery({ ...thinkingOnly, turnIndex: 24, turnKey: `${thinkingOnly.turnKey}-third` }, validation, 2), "failed");
+});
+
 test("classifyToolValidationRecovery ignores normal stops and tool-result turns", () => {
 	const finalFacts = buildIncompleteStopFacts({
 		toolResultCount: 0,

@@ -694,10 +694,14 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 					turnKey: facts.turnKey,
 					retryCount: state.recoveryCounts.thinkingOnly,
 				});
+				const thinkingCanBeDisabled = getRecoveryThinkingOverrideStatus(activeModel).canOverrideChatTemplateThinking;
+				const thinkingOnlySteer = thinkingCanBeDisabled
+					? "Your previous turn produced only reasoning without a visible response or tool call. Continue your reasoning and commit to the next action: either emit a Pi tool call or write your final answer. Do not stop after the reasoning step."
+					: "Your previous turn produced only reasoning without a visible response or tool call. Use your current reasoning to determine the next step and emit it now: either a Pi tool call with correct arguments, or your final answer. Output must be visible — do not stop after the reasoning block.";
 				pi.sendMessage(
 					{
 						customType: "omlx-thinking-only-recovery",
-						content: "Your previous turn produced only reasoning without a visible response or tool call. Continue your reasoning and commit to the next action: either emit a Pi tool call or write your final answer. Do not stop after the reasoning step.",
+						content: thinkingOnlySteer,
 						display: false,
 					},
 					{
@@ -743,7 +747,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 			pi.sendMessage(
 				{
 					customType: "omlx-empty-stop-recovery",
-					content: buildEmptyStopRecoverySteer(),
+					content: buildEmptyStopRecoverySteer(getRecoveryThinkingOverrideStatus(activeModel).canOverrideChatTemplateThinking),
 					display: false,
 				},
 				{
@@ -849,8 +853,11 @@ function hasTools(payload: Record<string, unknown>): boolean {
 	return Array.isArray(payload.tools) && payload.tools.length > 0;
 }
 
-function buildEmptyStopRecoverySteer(): string {
-	return "Continue normally with thinking disabled for this recovery turn. Emit the next Pi tool call or a concise visible answer immediately. Do not end the turn with empty or thinking-only content.";
+function buildEmptyStopRecoverySteer(canOverrideThinking: boolean): string {
+	if (canOverrideThinking) {
+		return "Continue normally with thinking disabled for this recovery turn. Emit the next Pi tool call or a concise visible answer immediately. Do not end the turn with empty or thinking-only content.";
+	}
+	return "The previous turn produced no visible output. Emit the next Pi tool call or a concise visible answer immediately. Do not end the turn with empty content.";
 }
 
 function buildToolIntentRecoverySteer(facts: IncompleteStopFacts, retryCount: number): string {
@@ -863,10 +870,11 @@ function buildToolIntentRecoverySteer(facts: IncompleteStopFacts, retryCount: nu
 
 function buildToolValidationRecoverySteer(validationError: ToolValidationErrorFacts | undefined, retryCount: number): string {
 	const toolHint = validationError?.toolName ? ` for "${validationError.toolName}"` : "";
+	const errorDetail = validationError?.preview ? `\n\nValidation error:\n${validationError.preview}` : "";
 	if (retryCount <= 1) {
-		return `The previous Pi tool call${toolHint} was rejected by argument validation. Re-emit the same intended tool call with valid arguments that satisfy the tool schema. Do not call it with {}. Include all required fields. If you need more context, inspect first with an appropriate Pi tool. Do not end with empty content.`;
+		return `The previous Pi tool call${toolHint} was rejected by argument validation. Re-emit the same intended tool call with corrected arguments that satisfy the tool schema. Include all required fields with the exact parameter names the schema expects.${errorDetail}`;
 	}
-	return `The previous validation recovery still did not produce a valid Pi tool call${toolHint}. The next assistant message must either emit a Pi tool call with complete valid arguments, including every required field, or give the concise final answer if no tool is needed. Do not emit empty content or planning prose.`;
+	return `The previous validation recovery still did not produce a valid Pi tool call${toolHint}. The next assistant message must either emit a Pi tool call with complete valid arguments using the exact required field names, or give the concise final answer if no tool is needed.${errorDetail}`;
 }
 
 function nextCorrelationId(state: State): string {

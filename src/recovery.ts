@@ -262,8 +262,8 @@ export function classifyToolValidationRecovery(
 ): "none" | "retry" | "failed" {
 	if (!validationError?.hit) return "none";
 	if (facts.toolResultCount > 0) return "none";
-	if (facts.hasToolCalls || facts.hasThinking) return "none";
-	if (!facts.emptyStop) return "none";
+	if (facts.hasToolCalls || facts.hasVisibleText) return "none";
+	if (!facts.emptyStop && !facts.hasThinking) return "none";
 	return retryCount >= maxRetries ? "failed" : "retry";
 }
 
