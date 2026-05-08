@@ -11,10 +11,8 @@ import { extractOutputTokens, recordPerformanceSample, type PerformanceByModel }
 import { toProviderConfig } from "./src/provider.ts";
 import {
 	buildIncompleteStopFacts,
-	classifyEmptyStopRecovery,
 	classifyToolIntentStopRecovery,
 	classifyToolValidationRecovery,
-	classifyTrulyEmptyStopRecovery,
 	classifyThinkingOnlyStopRecovery,
 	emitIncompleteStopFactsEvent,
 	extractToolValidationError,
@@ -81,6 +79,8 @@ interface State {
 		toolValidation: number;
 		toolIntent: number;
 	};
+	corruptionCompactInFlight: boolean;
+	corruptionCompactAttempted: boolean;
 }
 
 interface StreamingSummary {
@@ -172,6 +172,8 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 			toolValidation: 0,
 			toolIntent: 0,
 		},
+		corruptionCompactInFlight: false,
+		corruptionCompactAttempted: false,
 	};
 
 	debugLog("extension_load", { provider: PROVIDER });
@@ -195,6 +197,8 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 			toolValidation: 0,
 			toolIntent: 0,
 		};
+		state.corruptionCompactInFlight = false;
+		state.corruptionCompactAttempted = false;
 		state.activeRequest = undefined;
 		state.activeCorrelationId = undefined;
 		state.streamingSummary = undefined;
@@ -418,6 +422,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 			state.thinkingOnlyRetryCount = 0;
 			state.toolIntentRetryCount = 0;
 			state.toolValidationRetryCount = 0;
+			state.corruptionCompactAttempted = false;
 			const fingerprint = toolCalls.map((c) => `${c.name}:${JSON.stringify(c.arguments)}`).join("|");
 			if (fingerprint === state.lastToolCallFingerprint) {
 				state.repeatedToolCallCount++;
@@ -465,19 +470,41 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 			previousMessage as unknown as BoundaryGarbageMessageLike | undefined,
 			turnMessage,
 		);
-		if (boundaryGarbage.hit && !state.boundaryGarbageRetry) {
+		if (boundaryGarbage.hit) {
+			if (state.recoveryCounts.boundaryGarbage >= MAX_SESSION_RECOVERIES_BOUNDARY_GARBAGE) {
+				debugLog("boundary_garbage_session_cap_exceeded", {
+					correlationId: state.activeCorrelationId,
+					model: ctx.model?.id,
+					turnIndex: event.turnIndex,
+					count: state.recoveryCounts.boundaryGarbage,
+				});
+				state.boundaryGarbageRetry = false;
+				ctx.ui.setStatus(STATUS_KEY, "OMLX boundary recovery exhausted");
+				ctx.ui.notify(
+					"OMLX session appears corrupted: protocol tags keep leaking after multiple recovery attempts. Consider restarting the OMLX session.",
+					"warning",
+				);
+				emitSessionCorruptionSuspected(pi, ctx, state, {
+					reason: "boundary-garbage-cap",
+					modelId: ctx.model?.id,
+					turnIndex: event.turnIndex,
+					recoveryCounts: { ...state.recoveryCounts },
+				});
+				return;
+			}
 			state.boundaryGarbageRetry = true;
 			state.recoveryCounts.boundaryGarbage += 1;
 			debugLog("boundary_garbage_retry", {
 				correlationId: state.activeCorrelationId,
 				model: ctx.model?.id,
 				turnIndex: event.turnIndex,
+				retryCount: state.recoveryCounts.boundaryGarbage,
 				diagnosis: boundaryGarbage,
 			});
 			pi.sendMessage(
 				{
 					customType: "omlx-boundary-recovery",
-					content: "Continue from the tool result. Do not output protocol tags by themselves. Emit the next tool call or answer normally.",
+					content: "Continue normally. Do not output protocol tags (</tool_call>, </parameter>, </function>, </tool_response>, <|im_start|>, <|im_end|>) on their own. Emit the next tool call or answer.",
 					display: false,
 				},
 				{
@@ -485,18 +512,6 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 					deliverAs: "steer",
 				},
 			);
-			return;
-		}
-
-		if (boundaryGarbage.hit && state.boundaryGarbageRetry) {
-			state.boundaryGarbageRetry = false;
-			debugLog("boundary_garbage_retry_failed", {
-				correlationId: state.activeCorrelationId,
-				model: ctx.model?.id,
-				turnIndex: event.turnIndex,
-			});
-			ctx.ui.setStatus(STATUS_KEY, "OMLX boundary recovery failed");
-			ctx.ui.notify("OMLX returned protocol garbage twice in a row after a tool result. Manual intervention needed.", "warning");
 			return;
 		}
 
@@ -660,7 +675,16 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 				});
 				state.thinkingOnlyRetryCount = 0;
 				ctx.ui.setStatus(STATUS_KEY, "OMLX returned thinking-only stop (session cap)");
-				ctx.ui.notify("OMLX exceeded session cap for thinking-only recoveries. Manual intervention needed.", "warning");
+				ctx.ui.notify(
+					"OMLX session appears corrupted: thinking-only stops repeat after multiple recovery attempts. Consider restarting the OMLX session.",
+					"warning",
+				);
+				emitSessionCorruptionSuspected(pi, ctx, state, {
+					reason: "thinking-only-cap",
+					modelId: ctx.model?.id,
+					turnIndex: event?.turnIndex,
+					recoveryCounts: { ...state.recoveryCounts },
+				});
 			} else {
 				state.recoveryCounts.thinkingOnly += 1;
 				debugLog("thinking_only_retry", {
@@ -686,8 +710,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		}
 
 		// Path 2: truly empty stop — nothing at all, disable thinking and demand action
-		const trulyEmptyRecovery = classifyTrulyEmptyStopRecovery(facts, state.trulyEmptyRetryInFlight);
-		if (trulyEmptyRecovery === "retry") {
+		if (facts.emptyStop && !facts.hasVisibleText && !facts.hasThinking && !facts.hasToolCalls) {
 			if (state.recoveryCounts.emptyStop >= MAX_SESSION_RECOVERIES_TRULY_EMPTY) {
 				debugLog("empty_stop_session_cap_exceeded", {
 					correlationId: state.activeCorrelationId,
@@ -696,41 +719,39 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 				});
 				state.trulyEmptyRetryInFlight = false;
 				ctx.ui.setStatus(STATUS_KEY, "OMLX returned empty completion (session cap)");
-				ctx.ui.notify("OMLX exceeded session cap for truly-empty recoveries. Manual intervention needed.", "warning");
-			} else {
-				state.trulyEmptyRetryInFlight = true;
-				state.recoveryCounts.emptyStop += 1;
-				debugLog("empty_stop_retry", {
-					correlationId: state.activeCorrelationId,
-					model: ctx.model?.id,
-					turnIndex: event?.turnIndex,
-					turnKey: facts.turnKey,
-				});
-				pi.sendMessage(
-					{
-						customType: "omlx-empty-stop-recovery",
-						content: buildEmptyStopRecoverySteer(),
-						display: false,
-					},
-					{
-						triggerTurn: true,
-						deliverAs: "steer",
-					},
+				ctx.ui.notify(
+					"OMLX session appears corrupted: empty completions repeat after multiple recovery attempts. Consider restarting the OMLX session.",
+					"warning",
 				);
+				emitSessionCorruptionSuspected(pi, ctx, state, {
+					reason: "empty-stop-cap",
+					modelId: ctx.model?.id,
+					turnIndex: event?.turnIndex,
+					recoveryCounts: { ...state.recoveryCounts },
+				});
 				return;
 			}
-		}
-
-			if (trulyEmptyRecovery === "failed") {
-				state.trulyEmptyRetryInFlight = false;
-			debugLog("empty_stop_retry_failed", {
+			state.trulyEmptyRetryInFlight = true;
+			state.recoveryCounts.emptyStop += 1;
+			debugLog("empty_stop_retry", {
 				correlationId: state.activeCorrelationId,
 				model: ctx.model?.id,
 				turnIndex: event?.turnIndex,
 				turnKey: facts.turnKey,
+				retryCount: state.recoveryCounts.emptyStop,
 			});
-			ctx.ui.setStatus(STATUS_KEY, "OMLX returned empty completion");
-			ctx.ui.notify("OMLX returned an empty assistant stop twice. Manual intervention needed.", "warning");
+			pi.sendMessage(
+				{
+					customType: "omlx-empty-stop-recovery",
+					content: buildEmptyStopRecoverySteer(),
+					display: false,
+				},
+				{
+					triggerTurn: true,
+					deliverAs: "steer",
+				},
+			);
+			return;
 		}
 
 		if (!isEmptyUnusableAssistantStop(facts)) {
@@ -925,6 +946,105 @@ function debugLog(kind: string, details: Record<string, unknown>): void {
 	} catch {
 		// Logging must never break the provider path.
 	}
+}
+
+interface SessionCorruptionSuspectedFacts {
+	reason: "boundary-garbage-cap" | "empty-stop-cap" | "thinking-only-cap";
+	modelId?: string;
+	turnIndex?: number;
+	recoveryCounts: Record<string, number>;
+}
+
+const OMLX_SESSION_CORRUPTION_EVENT = "pi-omlx-picker:session-corruption-suspected";
+
+const CORRUPTION_COMPACT_RESUME_STEER =
+	"The previous OMLX context was compacted after repeated provider corruption. " +
+	"Continue the task from the compacted summary. Do not emit protocol tags such as " +
+	"</tool_call>, </parameter>, </function>, </tool_response>, <|im_start|>, or " +
+	"<|im_end|> as standalone text.";
+
+function emitSessionCorruptionSuspected(
+	pi: ExtensionAPI,
+	ctx: ExtensionContext,
+	state: State,
+	facts: SessionCorruptionSuspectedFacts,
+): void {
+	// Emit the event for observability and external hooks.
+	const events = (pi as unknown as { events?: { emit?: (name: string, payload: SessionCorruptionSuspectedFacts) => unknown } }).events;
+	debugLog("session_corruption_suspected", {
+		event: OMLX_SESSION_CORRUPTION_EVENT,
+		facts,
+		compactInFlight: state.corruptionCompactInFlight,
+		compactAttempted: state.corruptionCompactAttempted,
+	});
+	if (typeof events?.emit === "function") {
+		try {
+			const result = events.emit(OMLX_SESSION_CORRUPTION_EVENT, facts);
+			if (result && typeof (result as Promise<unknown>).then === "function") {
+				(result as Promise<unknown>).catch((err) => {
+					debugLog("session_corruption_event_error", {
+						event: OMLX_SESSION_CORRUPTION_EVENT,
+						error: err instanceof Error ? err.message : String(err),
+					});
+				});
+			}
+		} catch (err) {
+			debugLog("session_corruption_event_error", {
+				event: OMLX_SESSION_CORRUPTION_EVENT,
+				error: err instanceof Error ? err.message : String(err),
+			});
+		}
+	}
+
+	// Trigger compaction if not already in-flight or previously attempted this episode.
+	if (state.corruptionCompactInFlight || state.corruptionCompactAttempted) {
+		debugLog("session_corruption_compact_skipped", {
+			reason: state.corruptionCompactInFlight ? "in-flight" : "already-attempted",
+			facts,
+		});
+		return;
+	}
+
+	if (typeof ctx.compact !== "function") {
+		debugLog("session_corruption_compact_unavailable", { facts });
+		return;
+	}
+
+	state.corruptionCompactInFlight = true;
+	state.corruptionCompactAttempted = true;
+	debugLog("session_corruption_compact_start", { facts });
+
+	ctx.compact({
+		customInstructions:
+			"The session encountered OMLX provider corruption: the model emitted protocol tags " +
+			"(</tool_call>, </parameter>, <|im_start|>, etc.) as output, or produced empty/thinking-only " +
+			"stops repeatedly. Summarize only meaningful task progress. Omit corrupted turns, " +
+			"empty assistant stops, and recovery steers.",
+		onComplete: () => {
+			state.corruptionCompactInFlight = false;
+			debugLog("session_corruption_compact_complete", { facts });
+			pi.sendMessage(
+				{
+					customType: "omlx-corruption-resume",
+					content: CORRUPTION_COMPACT_RESUME_STEER,
+					display: false,
+				},
+				{
+					triggerTurn: true,
+					deliverAs: "steer",
+				},
+			);
+		},
+		onError: (error) => {
+			state.corruptionCompactInFlight = false;
+			const message = error instanceof Error ? error.message : String(error);
+			debugLog("session_corruption_compact_error", { facts, error: message });
+			ctx.ui.notify(
+				`OMLX session corruption recovery: compaction failed (${message}). Manual intervention needed.`,
+				"warning",
+			);
+		},
+	});
 }
 
 function emitIncompleteStopFacts(pi: ExtensionAPI, facts: IncompleteStopFacts): void {

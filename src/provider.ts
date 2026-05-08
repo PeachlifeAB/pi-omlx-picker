@@ -1,18 +1,18 @@
-import type {
-	ProviderConfig,
-	ProviderModelConfig,
-} from "@mariozechner/pi-coding-agent";
 import {
-	createAssistantMessageEventStream,
-	streamSimpleOpenAICompletions,
 	type Api,
 	type AssistantMessage,
 	type AssistantMessageEvent,
 	type AssistantMessageEventStream,
 	type Context,
+	createAssistantMessageEventStream,
 	type Model,
 	type SimpleStreamOptions,
+	streamSimpleOpenAICompletions,
 } from "@mariozechner/pi-ai";
+import type {
+	ProviderConfig,
+	ProviderModelConfig,
+} from "@mariozechner/pi-coding-agent";
 import type { OmlxModel } from "./catalog.ts";
 
 // Pi's documented defaults when the server doesn't report per-model values.
@@ -21,7 +21,13 @@ const DEFAULT_CONTEXT_WINDOW = 128000;
 const DEFAULT_MAX_TOKENS = 16384;
 const DEFAULT_FIRST_DELTA_TIMEOUT_MS = 120_000;
 const FIRST_DELTA_MAX_ATTEMPTS = 2;
-type StreamTimeoutEvent = { model: string; timeoutMs: number; attempt: number; maxAttempts: number; final: boolean };
+type StreamTimeoutEvent = {
+	model: string;
+	timeoutMs: number;
+	attempt: number;
+	maxAttempts: number;
+	final: boolean;
+};
 
 export function toProviderConfig(
 	apiRoot: string,
@@ -82,7 +88,9 @@ function streamOmlxOpenAICompletions(
 
 	const pushWithStart = (event: AssistantMessageEvent) => {
 		if (!startPushed) {
-			stream.push(startEvent ?? { type: "start", partial: eventPartial(event, model) });
+			stream.push(
+				startEvent ?? { type: "start", partial: eventPartial(event, model) },
+			);
 			startPushed = true;
 		}
 		stream.push(event);
@@ -108,10 +116,14 @@ function streamOmlxOpenAICompletions(
 					controller.abort();
 				}, firstDeltaTimeoutMs);
 
-				const inner = streamSimpleOpenAICompletions(model as Model<"openai-completions">, context, {
-					...options,
-					signal,
-				});
+				const inner = streamSimpleOpenAICompletions(
+					model as Model<"openai-completions">,
+					context,
+					{
+						...options,
+						signal,
+					},
+				);
 				for await (const event of inner) {
 					if (closed || attemptTimedOut) break;
 					if (event.type === "start") {
@@ -154,7 +166,11 @@ function streamOmlxOpenAICompletions(
 			pushWithStart({
 				type: "error",
 				reason: options?.signal?.aborted ? "aborted" : "error",
-				error: errorAssistantMessage(model, error instanceof Error ? error.message : String(error), options?.signal?.aborted ? "aborted" : "error"),
+				error: errorAssistantMessage(
+					model,
+					error instanceof Error ? error.message : String(error),
+					options?.signal?.aborted ? "aborted" : "error",
+				),
 			});
 			stream.end();
 		}
@@ -176,7 +192,10 @@ function isMeaningfulBodyEvent(event: AssistantMessageEvent): boolean {
 	].includes(event.type);
 }
 
-function mergeAbortSignals(parent: AbortSignal | undefined, child: AbortSignal): AbortSignal {
+function mergeAbortSignals(
+	parent: AbortSignal | undefined,
+	child: AbortSignal,
+): AbortSignal {
 	if (!parent) return child;
 	if (parent.aborted) return parent;
 	const controller = new AbortController();
@@ -186,14 +205,24 @@ function mergeAbortSignals(parent: AbortSignal | undefined, child: AbortSignal):
 	return controller.signal;
 }
 
-function eventPartial(event: AssistantMessageEvent, model: Model<Api>): AssistantMessage {
+function eventPartial(
+	event: AssistantMessageEvent,
+	model: Model<Api>,
+): AssistantMessage {
 	if ("partial" in event) return event.partial;
 	if ("message" in event) return event.message;
 	if ("error" in event) return event.error;
-	return errorAssistantMessage(model, "OMLX stream started without a start event");
+	return errorAssistantMessage(
+		model,
+		"OMLX stream started without a start event",
+	);
 }
 
-function errorAssistantMessage(model: Model<Api>, errorMessage: string, stopReason: "error" | "aborted" = "error"): AssistantMessage {
+function errorAssistantMessage(
+	model: Model<Api>,
+	errorMessage: string,
+	stopReason: "error" | "aborted" = "error",
+): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [],
@@ -218,5 +247,7 @@ function resolveFirstDeltaTimeoutMs(): number {
 	const raw = process.env.OMLX_STREAM_FIRST_DELTA_TIMEOUT_MS;
 	if (!raw) return DEFAULT_FIRST_DELTA_TIMEOUT_MS;
 	const value = Number(raw);
-	return Number.isFinite(value) && value > 0 ? value : DEFAULT_FIRST_DELTA_TIMEOUT_MS;
+	return Number.isFinite(value) && value > 0
+		? value
+		: DEFAULT_FIRST_DELTA_TIMEOUT_MS;
 }
