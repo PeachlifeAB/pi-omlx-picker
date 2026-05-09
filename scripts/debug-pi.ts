@@ -35,7 +35,6 @@ function main(): void {
 	if (mode === "timeline") printTimeline(modeArgs);
 
 	section("NEXT CHECKS");
-	line("Use /omlx-status for live in-Pi active session state.");
 	line("Use `mise run debug:omlx` for OMLX model settings, model files, templates, and OMLX cache state.");
 	line("Use `mise run debug:pi -- timeline [session-id|session-file|iso-time]` for a tight Pi+OMLX event window.");
 }
@@ -436,8 +435,6 @@ function printSessionSummary(path: string): void {
 	if (latestModels.length > 0) line(`recent model changes: ${latestModels.join(" -> ")}`);
 	const customMessages = messages.filter((message) => message.role === "custom");
 	if (customMessages.length > 0) line(`custom messages: ${customMessages.length}`);
-	const statusMessages = customMessages.filter((message) => message.customType === "omlx-status");
-	if (statusMessages.length > 0) line(`omlx-status messages: ${statusMessages.length}`);
 }
 
 function printRecentSessionDirs(): void {

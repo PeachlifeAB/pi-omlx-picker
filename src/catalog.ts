@@ -545,4 +545,3 @@ function compactObject(
 	});
 	return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
-

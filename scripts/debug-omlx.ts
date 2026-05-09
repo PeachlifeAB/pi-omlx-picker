@@ -82,7 +82,7 @@ function main(): void {
 	}
 
 	section("NEXT CHECKS");
-	line("Use /omlx-status for live Pi session state. This task is shell-visible filesystem diagnostics.");
+	line("This task reports shell-visible filesystem diagnostics only.");
 	line("Use `mise run smoke:omlx` when you need a live OMLX request check.");
 }
 

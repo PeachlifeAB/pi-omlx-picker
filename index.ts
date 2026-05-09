@@ -1,10 +1,11 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { PROVIDER_KEY, saveOmlxCredential } from "./src/auth-storage.ts";
 import { fetchModels, resolveLocalModelSettingsPath, type OmlxModel } from "./src/catalog.ts";
-import { loadConfig, MissingEnvError, type OmlxConfig } from "./src/config.ts";
+import { applyStoredCredentialToEnv, loadConfig, MissingEnvError, normalizeBaseUrl, type OmlxConfig } from "./src/config.ts";
 import { toProviderConfig } from "./src/provider.ts";
 import { applyOmlxThinkingControls } from "./src/thinking.ts";
 
-const PROVIDER = "omlx";
+const PROVIDER = PROVIDER_KEY;
 const EXTENSION_SINGLETON_KEY = Symbol.for("pi-omlx-picker/loaded");
 
 interface State {
@@ -30,6 +31,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		modelSettingsPath: undefined,
 	};
 
+	applyStoredCredentialToEnv();
 	await refreshProvider(pi, state);
 
 	pi.on("before_provider_request", (event, ctx) => {
@@ -37,7 +39,44 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		const activeModel = findCatalogModel(state, ctx.model.id);
 		return applyOmlxThinkingControls(event.payload, pi.getThinkingLevel(), activeModel?.thinkingDefault);
 	});
+
+	pi.registerCommand("omlx-login", {
+		description: "Sign in to OMLX (set base URL and API key)",
+		handler: async (_args, ctx) => {
+			const baseUrlInput = await ctx.ui.input("OMLX base URL", "http://127.0.0.1:8000/v1");
+			if (!baseUrlInput) return;
+			const apiKey = await ctx.ui.input("OMLX API key", "omlx-...");
+			if (!apiKey) return;
+
+			let baseUrl: string;
+			try {
+				baseUrl = normalizeBaseUrl(baseUrlInput);
+			} catch (err) {
+				ctx.ui.notify(`Invalid base URL: ${err instanceof Error ? err.message : String(err)}`, "error");
+				return;
+			}
+
+			ctx.ui.notify("Validating OMLX credentials…", "info");
+			try {
+				await fetchModels(baseUrl, apiKey, { timeoutMs: VALIDATE_TIMEOUT_MS });
+			} catch (err) {
+				ctx.ui.notify(`OMLX login failed: ${err instanceof Error ? err.message : String(err)}`, "error");
+				return;
+			}
+
+			saveOmlxCredential(baseUrl, apiKey);
+			process.env.OMLX_BASE_URL = baseUrl;
+			process.env.OMLX_API_KEY = apiKey;
+			await refreshProvider(pi, state);
+			const message = state.registered
+				? `OMLX connected — ${state.catalog.length} models available`
+				: `OMLX login saved but provider failed: ${state.lastError ?? "unknown error"}`;
+			ctx.ui.notify(message, state.registered ? "info" : "warning");
+		},
+	});
 }
+
+const VALIDATE_TIMEOUT_MS = 10_000;
 
 function clearRegisteredProvider(pi: ExtensionAPI, state: State): void {
 	if (state.registered) {

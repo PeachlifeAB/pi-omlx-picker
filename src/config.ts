@@ -1,3 +1,5 @@
+import { loadOmlxCredential } from "./auth-storage.ts";
+
 export interface OmlxConfig {
 	apiRoot: string;
 	apiKeyEnvVar: string;
@@ -24,4 +26,23 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): OmlxConfig {
 		apiRoot: normalizeBaseUrl(baseUrl),
 		apiKeyEnvVar: "OMLX_API_KEY",
 	};
+}
+
+// Env vars win over stored creds so CI and per-shell overrides work.
+export function applyStoredCredentialToEnv(
+	env: NodeJS.ProcessEnv = process.env,
+): boolean {
+	if (env.OMLX_BASE_URL && env.OMLX_API_KEY) return false;
+	const stored = loadOmlxCredential();
+	if (!stored) return false;
+	let applied = false;
+	if (!env.OMLX_BASE_URL) {
+		env.OMLX_BASE_URL = stored.baseUrl;
+		applied = true;
+	}
+	if (!env.OMLX_API_KEY) {
+		env.OMLX_API_KEY = stored.apiKey;
+		applied = true;
+	}
+	return applied;
 }
