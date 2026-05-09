@@ -1,4 +1,4 @@
-# Pi OMLX Bridge
+# Pi OMLX Picker
 
 Pi extension that discovers models from a live OMLX server and registers them
 as a native Pi provider. Model switching uses Pi's built-in `/model` command.
