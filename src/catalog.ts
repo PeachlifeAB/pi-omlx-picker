@@ -1,10 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import {
-	deriveNativeThinkingProjection,
-	type PiThinkingLevel,
-} from "./native-thinking.ts";
 
 export interface OmlxModel {
 	id: string;
@@ -14,7 +10,6 @@ export interface OmlxModel {
 	contextWindow?: number;
 	maxTokens?: number;
 	thinkingDefault?: boolean | null;
-	/** Bridge-only field; not an OMLX ModelSettings field. */
 	taskBudgetTokens?: number;
 	maxToolResultTokens?: number;
 	thinkingBudgetTokens?: number;
@@ -29,8 +24,6 @@ export interface OmlxModel {
 	indexCacheFreq?: number;
 	reasoningParser?: string;
 	activeProfileName?: string;
-	nativeThinkingLevel?: PiThinkingLevel;
-	nativeThinkingSource?: string;
 	modelType?: string | null;
 	settingsSummary?: Record<string, unknown>;
 }
@@ -160,29 +153,6 @@ export function parseModelsStatusResponse(json: unknown): OmlxModel[] {
 		const type =
 			entry.model_type_override ?? entry.model_type ?? entry.engine_type;
 		if (typeof type === "string") m.modelType = type.toLowerCase();
-		const nativeThinking = deriveNativeThinkingProjection({
-			sourcePrefix: "status",
-			enableThinking:
-				typeof entry.enable_thinking === "boolean"
-					? entry.enable_thinking
-					: typeof chatTemplateKwargs?.enable_thinking === "boolean"
-						? chatTemplateKwargs.enable_thinking
-						: undefined,
-			enableThinkingSource:
-				typeof entry.enable_thinking === "boolean"
-					? "status.enable_thinking"
-					: typeof chatTemplateKwargs?.enable_thinking === "boolean"
-						? "status.chat_template_kwargs.enable_thinking"
-						: undefined,
-			thinkingDefault: m.thinkingDefault,
-			thinkingBudgetEnabled: m.thinkingBudgetEnabled,
-			thinkingBudgetTokens: m.thinkingBudgetTokens,
-			reasoningEffort: chatTemplateKwargs?.reasoning_effort,
-		});
-		if (nativeThinking) {
-			m.nativeThinkingLevel = nativeThinking.level;
-			m.nativeThinkingSource = formatNativeThinkingSource(nativeThinking);
-		}
 		out.push(m);
 	}
 	return out;
@@ -376,8 +346,6 @@ export function applyLocalModelSettings(
 			next.indexCacheFreq !== model.indexCacheFreq ||
 			next.reasoningParser !== model.reasoningParser ||
 			next.activeProfileName !== model.activeProfileName ||
-			next.nativeThinkingLevel !== model.nativeThinkingLevel ||
-			next.nativeThinkingSource !== model.nativeThinkingSource ||
 			next.modelType !== model.modelType ||
 			JSON.stringify(next.settingsSummary) !==
 				JSON.stringify(model.settingsSummary)
@@ -469,29 +437,6 @@ function applyModelSettingsEntry(
 		next.activeProfileName = entry.active_profile_name;
 	if (typeof entry.model_type_override === "string")
 		next.modelType = entry.model_type_override.toLowerCase();
-	const nativeThinking = deriveNativeThinkingProjection({
-		sourcePrefix: "model_settings",
-		enableThinking:
-			typeof entry.enable_thinking === "boolean"
-				? entry.enable_thinking
-				: typeof chatTemplateKwargs?.enable_thinking === "boolean"
-					? chatTemplateKwargs.enable_thinking
-					: undefined,
-		enableThinkingSource:
-			typeof entry.enable_thinking === "boolean"
-				? "model_settings.enable_thinking"
-				: typeof chatTemplateKwargs?.enable_thinking === "boolean"
-					? "model_settings.chat_template_kwargs.enable_thinking"
-					: undefined,
-		thinkingDefault: next.thinkingDefault,
-		thinkingBudgetEnabled: next.thinkingBudgetEnabled,
-		thinkingBudgetTokens: next.thinkingBudgetTokens,
-		reasoningEffort: chatTemplateKwargs?.reasoning_effort,
-	});
-	if (nativeThinking) {
-		next.nativeThinkingLevel = nativeThinking.level;
-		next.nativeThinkingSource = formatNativeThinkingSource(nativeThinking);
-	}
 	next.settingsSummary = summarizeModelSettingsEntry(entry);
 	return next;
 }
@@ -601,11 +546,3 @@ function compactObject(
 	return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
-function formatNativeThinkingSource(nativeThinking: {
-	source: string;
-	detail?: string;
-}): string {
-	return nativeThinking.detail === undefined
-		? nativeThinking.source
-		: `${nativeThinking.source}=${nativeThinking.detail}`;
-}

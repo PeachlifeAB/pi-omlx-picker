@@ -309,8 +309,10 @@ async function postChat(payload: Record<string, unknown>): Promise<any> {
 }
 
 function normalizeBaseUrl(value: string): string {
-	const trimmed = value.replace(/\/+$/, "");
-	return trimmed.endsWith("/v1") ? trimmed : `${trimmed}/v1`;
+	const withV1 = value.replace(/\/+$/, "");
+	const url = new URL(withV1.endsWith("/v1") ? withV1 : `${withV1}/v1`);
+	if (url.hostname === "0.0.0.0") url.hostname = "127.0.0.1";
+	return url.toString().replace(/\/+$/, "");
 }
 
 main().catch((err) => {

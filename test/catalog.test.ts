@@ -88,8 +88,6 @@ test("parseModelsStatusResponse extracts Pi-supported fields and OMLX-only metad
 			indexCacheFreq: 4,
 			reasoningParser: "qwen",
 			activeProfileName: "agentic",
-			nativeThinkingLevel: "medium",
-			nativeThinkingSource: "status.thinking_budget_tokens=8192",
 			modelType: "vlm",
 		},
 		{ id: "m2", contextWindow: 128000, maxTokens: 8192, thinkingDefault: null },
@@ -128,8 +126,6 @@ test("fetchModels prefers /models/status", async () => {
 			contextWindow: 256000,
 			maxTokens: 32768,
 			thinkingDefault: false,
-			nativeThinkingLevel: "off",
-			nativeThinkingSource: "status.thinking_default=false",
 		}]);
 		assert.deepEqual(calls, ["http://example.test/v1/models/status"]);
 	} finally {
@@ -176,8 +172,6 @@ test("fetchModels applies local OMLX model settings for localhost metadata refin
 		assert.deepEqual(model.forcedCtKwargs, ["enable_thinking"]);
 		assert.equal(model.thinkingBudgetEnabled, false);
 		assert.equal(model.thinkingBudgetTokens, 0);
-		assert.equal(model.nativeThinkingLevel, "off");
-		assert.equal(model.nativeThinkingSource, "model_settings.chat_template_kwargs.enable_thinking=false");
 		assert.deepEqual(model.settingsSummary, {
 			thinking: {
 				enabled: false,
@@ -273,8 +267,6 @@ test("applyLocalModelSettings projects full model_settings entry into bridge met
 	assert.equal(model.indexCacheFreq, 4);
 	assert.equal(model.reasoningParser, "qwen");
 	assert.equal(model.activeProfileName, "agentic");
-	assert.equal(model.nativeThinkingLevel, "high");
-	assert.equal(model.nativeThinkingSource, "model_settings.chat_template_kwargs.reasoning_effort=high");
 	assert.equal(model.modelType, "vlm");
 	assert.deepEqual(model.settingsSummary, {
 		identity: {
@@ -377,8 +369,6 @@ test("fetchModels applies local OMLX model settings for 0.0.0.0 API root", async
 			id: "documenter",
 			thinkingDefault: false,
 			chatTemplateKwargs: { enable_thinking: true },
-			nativeThinkingLevel: "off",
-			nativeThinkingSource: "model_settings.enable_thinking=false",
 			settingsSummary: {
 				thinking: {
 					enabled: false,
