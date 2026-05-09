@@ -18,7 +18,7 @@
     ]
   },
   "devDependencies": {
-    "@mariozechner/pi-ai": "^0.67.6",
+    "@mariozechner/pi-ai": "^0.73.1",
     "@mariozechner/pi-coding-agent": "*",
     "tsx": "^4.7.0",
     "typescript": "^6.0.3"
