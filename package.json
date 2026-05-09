@@ -1,7 +1,6 @@
 {
   "name": "pi-omlx-picker",
-  "private": true,
-  "version": "0.1.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "Pi extension that maps OMLX model settings into native Pi model metadata.",
   "license": "MIT",

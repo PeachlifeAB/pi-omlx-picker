@@ -1,0 +1,31 @@
+# dev/agent artifacts
+.review/
+.llm/
+.claude/
+.codex/
+.pi/
+references/
+log/
+docs/
+scripts/
+test/
+
+# agent notes
+JOURNAL.md
+MEMORY.md
+SOUL.md
+REVIEW.md
+PLAN.md
+TODO.md
+AGENTS.override.md
+CLAUDE*.md
+DESIGN.md
+
+# config/env
+.env*
+biome.json
+mise.toml
+tsconfig.json
+
+# misc
+.DS_Store
