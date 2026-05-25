@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readlinkSync, readdirSync, readFileSync, statSync } from "node:fs";
+import {
+	existsSync,
+	lstatSync,
+	readdirSync,
+	readFileSync,
+	readlinkSync,
+	statSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 
@@ -8,7 +15,14 @@ type JsonObject = Record<string, unknown>;
 const HOME = homedir();
 const MODEL_SETTINGS = join(HOME, ".omlx", "model_settings.json");
 const MODELS_DIR = join(HOME, "models");
-const PI_DEBUG_LOG = join(HOME, ".pi", "packages", "pi-omlx-picker", "log", "provider-debug.log");
+const PI_DEBUG_LOG = join(
+	HOME,
+	".pi",
+	"packages",
+	"pi-omlx-picker",
+	"log",
+	"provider-debug.log",
+);
 const LOCAL_DEBUG_LOG = resolve("log/provider-debug.log");
 const SMOKE_LOG_DIR = resolve("log/smoke-test");
 
@@ -73,7 +87,8 @@ function main(): void {
 
 	section("LOGS");
 	printLogSummary("pi debug log", PI_DEBUG_LOG);
-	if (LOCAL_DEBUG_LOG !== PI_DEBUG_LOG) printLogSummary("local debug log", LOCAL_DEBUG_LOG);
+	if (LOCAL_DEBUG_LOG !== PI_DEBUG_LOG)
+		printLogSummary("local debug log", LOCAL_DEBUG_LOG);
 	printLatestFiles("latest smoke logs", SMOKE_LOG_DIR, 8);
 
 	section("CACHE STATE");
@@ -108,7 +123,10 @@ function getModelSettings(settings: unknown): JsonObject | undefined {
 	return asObject(root.models) ?? root;
 }
 
-function selectModelNames(models: JsonObject | undefined, requested: string[]): string[] {
+function selectModelNames(
+	models: JsonObject | undefined,
+	requested: string[],
+): string[] {
 	if (!models) return [];
 	if (requested.length > 0) return requested.filter((name) => name in models);
 	return Object.keys(models).sort((a, b) => a.localeCompare(b));
@@ -135,7 +153,10 @@ function printModelPaths(modelNames: string[]): void {
 		line(`missing: ${MODELS_DIR}`);
 		return;
 	}
-	const names = modelNames.length > 0 ? modelNames : readdirSync(MODELS_DIR).sort((a, b) => a.localeCompare(b));
+	const names =
+		modelNames.length > 0
+			? modelNames
+			: readdirSync(MODELS_DIR).sort((a, b) => a.localeCompare(b));
 	for (const name of names) {
 		const path = join(MODELS_DIR, name);
 		if (!existsSync(path)) {
@@ -189,7 +210,9 @@ function printLogSummary(label: string, path: string): void {
 		kindCounts.set(kind, (kindCounts.get(kind) ?? 0) + 1);
 	}
 	line(`parseable recent lines: ${rows.length}`);
-	for (const [kind, count] of [...kindCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12)) {
+	for (const [kind, count] of [...kindCounts.entries()]
+		.sort((a, b) => b[1] - a[1])
+		.slice(0, 12)) {
 		line(`${kind}: ${count}`);
 	}
 }
@@ -214,7 +237,9 @@ function fileSummary(label: string, path: string): void {
 		return;
 	}
 	const stat = statSync(path);
-	line(`${label}: ${path} (${formatBytes(stat.size)}, mtime ${stat.mtime.toISOString()})`);
+	line(
+		`${label}: ${path} (${formatBytes(stat.size)}, mtime ${stat.mtime.toISOString()})`,
+	);
 }
 
 function dirSummary(label: string, path: string): void {
@@ -228,14 +253,18 @@ function dirSummary(label: string, path: string): void {
 		return;
 	}
 	const entries = readdirSync(path);
-	line(`${label}: ${path} (${entries.length} entries, mtime ${stat.mtime.toISOString()})`);
+	line(
+		`${label}: ${path} (${entries.length} entries, mtime ${stat.mtime.toISOString()})`,
+	);
 }
 
 function resolveModelPath(path: string): string | undefined {
 	if (!existsSync(path)) return undefined;
 	try {
 		const link = lstatSync(path);
-		const resolved = link.isSymbolicLink() ? resolve(path, "..", readlinkSync(path)) : path;
+		const resolved = link.isSymbolicLink()
+			? resolve(path, "..", readlinkSync(path))
+			: path;
 		return statSync(resolved).isDirectory() ? resolve(resolved) : undefined;
 	} catch {
 		return undefined;
@@ -265,11 +294,18 @@ function safeJson(text: string): unknown {
 }
 
 function asObject(value: unknown): JsonObject | undefined {
-	return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : undefined;
+	return value && typeof value === "object" && !Array.isArray(value)
+		? (value as JsonObject)
+		: undefined;
 }
 
 function formatValue(value: unknown): string {
-	if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+	if (
+		typeof value === "string" ||
+		typeof value === "number" ||
+		typeof value === "boolean"
+	)
+		return String(value);
 	return JSON.stringify(value);
 }
 

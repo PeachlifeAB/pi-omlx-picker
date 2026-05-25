@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { test } from "node:test";
+import { test } from "vitest";
 import { toProviderConfig } from "../src/provider.ts";
 
 test("toProviderConfig marks only explicit thinking_default true as reasoning capable", () => {

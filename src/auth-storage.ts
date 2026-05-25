@@ -1,16 +1,18 @@
 import {
 	type ApiKeyCredential,
 	AuthStorage,
-} from "@mariozechner/pi-coding-agent";
+	type OAuthCredential,
+} from "@earendil-works/pi-coding-agent";
 
 export const PROVIDER_KEY = "omlx";
 
 export interface OmlxStoredCredential {
-	baseUrl: string;
+	baseUrl?: string;
 	apiKey: string;
 }
 
 type OmlxApiKeyCredential = ApiKeyCredential & { baseUrl?: string };
+type OmlxOAuthCredential = OAuthCredential & { baseUrl?: string };
 
 let storage: AuthStorage | undefined;
 function getStorage(): AuthStorage {
@@ -25,10 +27,18 @@ export function _setStorageForTesting(s: AuthStorage | undefined): void {
 export function loadOmlxCredential(): OmlxStoredCredential | undefined {
 	const cred = getStorage().get(PROVIDER_KEY) as
 		| OmlxApiKeyCredential
+		| OmlxOAuthCredential
 		| undefined;
-	if (!cred || cred.type !== "api_key") return undefined;
-	if (!cred.baseUrl || !cred.key) return undefined;
-	return { baseUrl: cred.baseUrl, apiKey: cred.key };
+	if (!cred) return undefined;
+	if (cred.type === "api_key") {
+		if (!cred.key) return undefined;
+		return { baseUrl: cred.baseUrl, apiKey: cred.key };
+	}
+	if (cred.type === "oauth") {
+		if (!cred.access) return undefined;
+		return { baseUrl: cred.baseUrl, apiKey: cred.access };
+	}
+	return undefined;
 }
 
 export function saveOmlxCredential(baseUrl: string, apiKey: string): void {

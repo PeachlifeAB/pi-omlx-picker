@@ -1,15 +1,10 @@
 import { loadOmlxCredential } from "./auth-storage.ts";
 
+export const DEFAULT_OMLX_BASE_URL = "http://127.0.0.1:8000/v1";
+
 export interface OmlxConfig {
 	apiRoot: string;
 	apiKeyEnvVar: string;
-}
-
-export class MissingEnvError extends Error {
-	constructor(public readonly varName: string) {
-		super(`${varName} is not set`);
-		this.name = "MissingEnvError";
-	}
 }
 
 export function normalizeBaseUrl(raw: string): string {
@@ -19,30 +14,35 @@ export function normalizeBaseUrl(raw: string): string {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): OmlxConfig {
-	const baseUrl = env.OMLX_BASE_URL;
-	if (!baseUrl) throw new MissingEnvError("OMLX_BASE_URL");
-	if (!env.OMLX_API_KEY) throw new MissingEnvError("OMLX_API_KEY");
+	const stored = loadOmlxCredential();
+	const baseUrl = env.OMLX_BASE_URL
+		? env.OMLX_BASE_URL
+		: env.OMLX_API_KEY
+			? DEFAULT_OMLX_BASE_URL
+			: (stored?.baseUrl ?? DEFAULT_OMLX_BASE_URL);
 	return {
 		apiRoot: normalizeBaseUrl(baseUrl),
 		apiKeyEnvVar: "OMLX_API_KEY",
 	};
 }
 
-// Env vars win over stored creds so CI and per-shell overrides work.
+export function resolveConfiguredApiKey(
+	env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+	if (env.OMLX_API_KEY) return env.OMLX_API_KEY;
+	if (env.OMLX_BASE_URL) return undefined;
+	return loadOmlxCredential()?.apiKey;
+}
+
+// Legacy helper for older stored api_key credentials. Never fills only one side
+// of the env pair; partial shell overrides remain explicit shell state.
 export function applyStoredCredentialToEnv(
 	env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-	if (env.OMLX_BASE_URL && env.OMLX_API_KEY) return false;
+	if (env.OMLX_BASE_URL || env.OMLX_API_KEY) return false;
 	const stored = loadOmlxCredential();
-	if (!stored) return false;
-	let applied = false;
-	if (!env.OMLX_BASE_URL) {
-		env.OMLX_BASE_URL = stored.baseUrl;
-		applied = true;
-	}
-	if (!env.OMLX_API_KEY) {
-		env.OMLX_API_KEY = stored.apiKey;
-		applied = true;
-	}
-	return applied;
+	if (!stored?.apiKey) return false;
+	env.OMLX_BASE_URL = stored.baseUrl ?? DEFAULT_OMLX_BASE_URL;
+	env.OMLX_API_KEY = stored.apiKey;
+	return true;
 }

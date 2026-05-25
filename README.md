@@ -8,9 +8,9 @@ This extension discovers models from a local OMLX server and registers them as n
 
 ## ✨ Features
 
-* **Zero-Friction Discovery:** Automatically fetches and registers available OMLX models on startup.
-* **Native Integration:** Models show up in the standard `/model` menu—no custom commands needed for chat.
-* **Smart Overrides:** Applies per-request thinking controls based on each model's `thinkingDefault` metadata.
+* Auto discovery: fetches and registers available OMLX models without blocking Pi startup.
+* Native integration: login uses Pi's standard `/login`, and models use Pi's standard `/model` menu.
+* Smart overrides: applies per-request thinking controls based on each model's `thinkingDefault` metadata.
 
 ## 📦 Installation
 
@@ -18,13 +18,22 @@ This extension discovers models from a local OMLX server and registers them as n
 pi install npm:pi-omlx-picker
 ```
 
+## 🛠️ Development
+
+- `npm install`
+- `npm run check`
+- `npm run format`
+- `npm test`
+- `npm run test:watch`
+
 ## 🚀 Quick Start
 
-1. Run `/omlx-login` in Pi.
-2. Paste your OMLX base URL and API key when prompted.
-3. Type `/model` to see and select your OMLX models.
+1. Start your local OMLX server.
+2. Run `/login` in Pi, choose **API key**, then choose **OMLX**.
+3. Enter your OMLX API key.
+4. Type `/model` to see and select your OMLX models.
 
-Re-run `/omlx-login` to update credentials.
+The default base URL is `http://127.0.0.1:8000/v1`. Set `OMLX_BASE_URL` before starting Pi if your OMLX server uses a different URL.
 
 ## ⚙️ Configuration
 

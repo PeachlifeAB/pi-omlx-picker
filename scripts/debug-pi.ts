@@ -1,5 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import {
+	existsSync,
+	lstatSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	statSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 
@@ -35,28 +42,56 @@ function main(): void {
 	if (mode === "timeline") printTimeline(modeArgs);
 
 	section("NEXT CHECKS");
-	line("Use `mise run debug:omlx` for OMLX model settings, model files, templates, and OMLX cache state.");
-	line("Use `mise run debug:pi -- timeline [session-id|session-file|iso-time]` for a tight Pi+OMLX event window.");
+	line(
+		"Use `mise run debug:omlx` for OMLX model settings, model files, templates, and OMLX cache state.",
+	);
+	line(
+		"Use `mise run debug:pi -- timeline [session-id|session-file|iso-time]` for a tight Pi+OMLX event window.",
+	);
 }
 
 function printInstall(): void {
 	section("INSTALL");
 	const piBins = findAllOnPath("pi");
-	line(`pi binaries: ${piBins.length > 0 ? piBins.join(", ") : "(not found on PATH)"}`);
+	line(
+		`pi binaries: ${piBins.length > 0 ? piBins.join(", ") : "(not found on PATH)"}`,
+	);
 	pathSummary("~/.pi", PI_HOME);
 	line(`~/.pi realpath: ${safeRealpath(PI_HOME) ?? "(missing)"}`);
 	gitSummary("~/.pi git", PI_HOME);
 	pathSummary("installed package", INSTALLED_PACKAGE);
-	line(`installed package realpath: ${safeRealpath(INSTALLED_PACKAGE) ?? "(missing)"}`);
-	line(`repo realpath: ${safeRealpath(process.cwd()) ?? resolve(process.cwd())}`);
-	line(`installed package is this repo: ${safeRealpath(INSTALLED_PACKAGE) === safeRealpath(process.cwd()) ? "yes" : "no"}`);
-	fileJsonSummary("installed package.json", join(INSTALLED_PACKAGE, "package.json"), ["name", "version", "description"]);
+	line(
+		`installed package realpath: ${safeRealpath(INSTALLED_PACKAGE) ?? "(missing)"}`,
+	);
+	line(
+		`repo realpath: ${safeRealpath(process.cwd()) ?? resolve(process.cwd())}`,
+	);
+	line(
+		`installed package is this repo: ${safeRealpath(INSTALLED_PACKAGE) === safeRealpath(process.cwd()) ? "yes" : "no"}`,
+	);
+	fileJsonSummary(
+		"installed package.json",
+		join(INSTALLED_PACKAGE, "package.json"),
+		["name", "version", "description"],
+	);
 }
 
 function printConfig(): void {
 	section("CONFIG");
-	fileJsonSummary("Pi config", PI_CONFIG, ["defaultModel", "model", "models", "providers", "packages", "extensions", "theme"]);
-	fileJsonSummary("skills lock", SKILLS_LOCK, ["skills", "packages", "updatedAt"]);
+	fileJsonSummary("Pi config", PI_CONFIG, [
+		"defaultModel",
+		"model",
+		"models",
+		"providers",
+		"packages",
+		"extensions",
+		"theme",
+	]);
+	fileJsonSummary("skills lock", SKILLS_LOCK, [
+		"skills",
+		"packages",
+		"updatedAt",
+	]);
 	pathSummary("Pi wiki", join(PI_HOME, "pi-wiki"));
 	printLatestFiles("Pi wiki entries", join(PI_HOME, "pi-wiki", "pi"), 8);
 }
@@ -99,14 +134,20 @@ function printTimeline(args: string[]): void {
 	const anchorInput = firstNonFlag(args);
 	const anchor = resolveTimelineAnchor(anchorInput);
 	if (!anchor) {
-		line("no anchor found; pass a session id, session file path, or ISO timestamp");
+		line(
+			"no anchor found; pass a session id, session file path, or ISO timestamp",
+		);
 		return;
 	}
 	if (anchor.note) line(anchor.note);
-	line(`anchor: ${anchor.date.toISOString()} (${formatLocal(anchor.date)} local)`);
+	line(
+		`anchor: ${anchor.date.toISOString()} (${formatLocal(anchor.date)} local)`,
+	);
 
 	const providerRows = readProviderRows(PACKAGE_DEBUG_LOG);
-	const request = findProviderRequest(providerRows, anchor.date) ?? latestProviderRequest(providerRows);
+	const request =
+		findProviderRequest(providerRows, anchor.date) ??
+		latestProviderRequest(providerRows);
 	if (!request) {
 		line("no provider request found in provider-debug.log");
 		return;
@@ -120,7 +161,9 @@ function printTimeline(args: string[]): void {
 
 	const start = new Date(requestDate.getTime() - 60_000);
 	const end = new Date(requestDate.getTime() + requestedWindowMinutes * 60_000);
-	line(`request: ${requestDate.toISOString()} (${formatLocal(requestDate)} local)`);
+	line(
+		`request: ${requestDate.toISOString()} (${formatLocal(requestDate)} local)`,
+	);
 	if (correlationId) line(`correlationId: ${correlationId}`);
 	const payload = asObject(request.payload);
 	if (payload) {
@@ -132,14 +175,21 @@ function printTimeline(args: string[]): void {
 		const preview = stringValue(payload.lastMessagePreview);
 		if (preview) line(`preview: ${preview.slice(0, 360).replace(/\s+/g, " ")}`);
 	}
-	line(`window: ${start.toISOString()} .. ${end.toISOString()} (${requestedWindowMinutes}m after request)`);
+	line(
+		`window: ${start.toISOString()} .. ${end.toISOString()} (${requestedWindowMinutes}m after request)`,
+	);
 
 	printProviderTimeline(providerRows, start, end, correlationId);
 	printOmlxTimeline(start, end);
 	printChangedFilesTimeline(start, end);
 }
 
-function printProviderTimeline(rows: JsonObject[], start: Date, end: Date, correlationId: string | undefined): void {
+function printProviderTimeline(
+	rows: JsonObject[],
+	start: Date,
+	end: Date,
+	correlationId: string | undefined,
+): void {
 	console.log("\n[provider events]");
 	const selected = rows.filter((row) => {
 		const date = parseIso(stringValue(row.ts));
@@ -148,7 +198,12 @@ function printProviderTimeline(rows: JsonObject[], start: Date, end: Date, corre
 		return (
 			!correlationId ||
 			stringValue(row.correlationId) === correlationId ||
-			["extension_load", "session_start", "native_thinking_applied", "catalog_status_loaded"].includes(kind)
+			[
+				"extension_load",
+				"session_start",
+				"native_thinking_applied",
+				"catalog_status_loaded",
+			].includes(kind)
 		);
 	});
 	if (selected.length === 0) {
@@ -167,9 +222,17 @@ function printProviderTimeline(rows: JsonObject[], start: Date, end: Date, corre
 		line(bits.join(" "));
 	}
 	const hasTerminal = selected.some((row) =>
-		["message_update", "assistant_message_metrics", "turn_end", "tool_call"].includes(stringValue(row.kind) ?? ""),
+		[
+			"message_update",
+			"assistant_message_metrics",
+			"turn_end",
+			"tool_call",
+		].includes(stringValue(row.kind) ?? ""),
 	);
-	if (!hasTerminal) line("diagnosis: provider opened request but no assistant/tool/turn progress was logged in this window");
+	if (!hasTerminal)
+		line(
+			"diagnosis: provider opened request but no assistant/tool/turn progress was logged in this window",
+		);
 }
 
 function printOmlxTimeline(start: Date, end: Date): void {
@@ -180,7 +243,9 @@ function printOmlxTimeline(start: Date, end: Date): void {
 	}
 	const patterns =
 		/chat\/completions|Chat completion request|Sampling params|Cache hit|Loaded block|Walk-back|Reconstructed cache|partial cache hit|Added request|Scheduled request|SpecPrefill|Prefill|Aborting request|Aborted request|ERROR|WARNING|Traceback|Exception/i;
-	const lines = readFileSync(OMLX_SERVER_LOG, "utf8").split(/\r?\n/).filter(Boolean);
+	const lines = readFileSync(OMLX_SERVER_LOG, "utf8")
+		.split(/\r?\n/)
+		.filter(Boolean);
 	let printed = 0;
 	const requestIds = new Set<string>();
 	for (const text of lines) {
@@ -196,26 +261,51 @@ function printOmlxTimeline(start: Date, end: Date): void {
 	}
 	if (printed === 0) line("none");
 	printOmlxRequestLifecycles(lines, requestIds);
-	if (!lines.some((text) => {
-		const date = parseOmlxLocalDate(text);
-		return Boolean(date && date >= start && date <= end && /Scheduled request|SpecPrefill|Aborted request|ERROR|Traceback|Exception/i.test(text));
-	})) {
-		line("diagnosis: OMLX log has no scheduler progress, abort, or exception after the request enqueue in this window");
+	if (
+		!lines.some((text) => {
+			const date = parseOmlxLocalDate(text);
+			return Boolean(
+				date &&
+					date >= start &&
+					date <= end &&
+					/Scheduled request|SpecPrefill|Aborted request|ERROR|Traceback|Exception/i.test(
+						text,
+					),
+			);
+		})
+	) {
+		line(
+			"diagnosis: OMLX log has no scheduler progress, abort, or exception after the request enqueue in this window",
+		);
 	}
 }
 
-function printOmlxRequestLifecycles(lines: string[], requestIds: Set<string>): void {
+function printOmlxRequestLifecycles(
+	lines: string[],
+	requestIds: Set<string>,
+): void {
 	if (requestIds.size === 0) return;
 	console.log("\n[OMLX exact request-id lifecycle]");
 	for (const id of requestIds) {
 		const matching = lines.filter((text) => text.includes(id));
 		line(`request ${id}: ${matching.length} log line(s)`);
-		for (const text of matching.slice(0, 40)) line(text.length > 900 ? `${text.slice(0, 900)}...` : text);
+		for (const text of matching.slice(0, 40))
+			line(text.length > 900 ? `${text.slice(0, 900)}...` : text);
 		if (matching.length > 40) line(`request ${id}: truncated after 40 lines`);
 		const lifecycle = matching.map(classifyOmlxLine).filter(Boolean);
-		line(`request ${id} lifecycle: ${lifecycle.length > 0 ? lifecycle.join(" -> ") : "(no classified lifecycle events)"}`);
-		if (!matching.some((text) => /Scheduled request|SpecPrefill|Aborted request|ERROR|Traceback|Exception|Generated|Finished|completed/i.test(text))) {
-			line(`request ${id} diagnosis: discovered by timestamp, then exact-id search found enqueue/cache lines only`);
+		line(
+			`request ${id} lifecycle: ${lifecycle.length > 0 ? lifecycle.join(" -> ") : "(no classified lifecycle events)"}`,
+		);
+		if (
+			!matching.some((text) =>
+				/Scheduled request|SpecPrefill|Aborted request|ERROR|Traceback|Exception|Generated|Finished|completed/i.test(
+					text,
+				),
+			)
+		) {
+			line(
+				`request ${id} diagnosis: discovered by timestamp, then exact-id search found enqueue/cache lines only`,
+			);
 		}
 	}
 }
@@ -237,7 +327,11 @@ function classifyOmlxLine(text: string): string | undefined {
 }
 
 function extractUuids(text: string): string[] {
-	return [...text.matchAll(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi)].map((match) => match[0]);
+	return [
+		...text.matchAll(
+			/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
+		),
+	].map((match) => match[0]);
 }
 
 function printChangedFilesTimeline(start: Date, end: Date): void {
@@ -248,7 +342,9 @@ function printChangedFilesTimeline(start: Date, end: Date): void {
 		join(OMLX_HOME, "logs"),
 		SESSION_ROOT,
 		PACKAGE_LOG_DIR,
-	].filter((path, index, all) => existsSync(path) && all.indexOf(path) === index);
+	].filter(
+		(path, index, all) => existsSync(path) && all.indexOf(path) === index,
+	);
 	const files = roots.flatMap((root) => recentFiles(root, start, end, 5));
 	const unique = [...new Map(files.map((file) => [file.path, file])).values()]
 		.sort((a, b) => a.mtime.getTime() - b.mtime.getTime())
@@ -257,39 +353,59 @@ function printChangedFilesTimeline(start: Date, end: Date): void {
 		line("none");
 		return;
 	}
-	for (const file of unique) line(`${file.mtime.toISOString()} ${formatBytes(file.size)} ${file.path}`);
+	for (const file of unique)
+		line(`${file.mtime.toISOString()} ${formatBytes(file.size)} ${file.path}`);
 }
 
-function resolveTimelineAnchor(input: string | undefined): { date: Date; note?: string } | undefined {
+function resolveTimelineAnchor(
+	input: string | undefined,
+): { date: Date; note?: string } | undefined {
 	if (!input) {
 		const latest = latestProviderRequest(readProviderRows(PACKAGE_DEBUG_LOG));
 		const date = parseIso(stringValue(latest?.ts));
-		return date ? { date, note: "anchor source: latest provider request" } : undefined;
+		return date
+			? { date, note: "anchor source: latest provider request" }
+			: undefined;
 	}
 	if (existsSync(input)) {
 		const date = dateFromSessionPath(input) ?? safeStat(input)?.mtime;
 		return date ? { date, note: `anchor source: file ${input}` } : undefined;
 	}
 	const directDate = parseLooseDate(input);
-	if (directDate) return { date: directDate, note: `anchor source: timestamp ${input}` };
+	if (directDate)
+		return { date: directDate, note: `anchor source: timestamp ${input}` };
 	const found = findSessionFileById(input);
 	if (found) {
 		const date = dateFromSessionPath(found) ?? safeStat(found)?.mtime;
-		return date ? { date, note: `anchor source: session file ${found}` } : undefined;
+		return date
+			? { date, note: `anchor source: session file ${found}` }
+			: undefined;
 	}
 	const uuidPrefix = input.slice(0, 8);
 	const providerRows = readProviderRows(PACKAGE_DEBUG_LOG);
-	const nearId = providerRows.find((row) => JSON.stringify(row).includes(input) || JSON.stringify(row).includes(uuidPrefix));
+	const nearId = providerRows.find(
+		(row) =>
+			JSON.stringify(row).includes(input) ||
+			JSON.stringify(row).includes(uuidPrefix),
+	);
 	const date = parseIso(stringValue(nearId?.ts));
-	if (date) return { date, note: `anchor source: provider log match for ${input}` };
+	if (date)
+		return { date, note: `anchor source: provider log match for ${input}` };
 	return undefined;
 }
 
-function findProviderRequest(rows: JsonObject[], anchor: Date): JsonObject | undefined {
+function findProviderRequest(
+	rows: JsonObject[],
+	anchor: Date,
+): JsonObject | undefined {
 	return rows.find((row) => {
 		if (row.kind !== "before_provider_request") return false;
 		const date = parseIso(stringValue(row.ts));
-		return Boolean(date && date >= anchor && date.getTime() - anchor.getTime() <= 10 * 60_000);
+		return Boolean(
+			date &&
+				date >= anchor &&
+				date.getTime() - anchor.getTime() <= 10 * 60_000,
+		);
 	});
 }
 
@@ -317,7 +433,11 @@ function findSessionFileById(id: string): string | undefined {
 			const stat = safeStat(path);
 			if (!stat) continue;
 			if (stat.isDirectory()) stack.push(path);
-			else if (name.includes(id) || (name.endsWith(".jsonl") && fileContains(path, id))) return path;
+			else if (
+				name.includes(id) ||
+				(name.endsWith(".jsonl") && fileContains(path, id))
+			)
+				return path;
 		}
 	}
 	return undefined;
@@ -334,13 +454,18 @@ function fileContains(path: string, needle: string): boolean {
 function dateFromSessionPath(path: string): Date | undefined {
 	const match = /(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z)_/.exec(path);
 	if (!match) return undefined;
-	return parseIso(match[1].replace(/T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z/, "T$1:$2:$3.$4Z"));
+	return parseIso(
+		match[1].replace(/T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z/, "T$1:$2:$3.$4Z"),
+	);
 }
 
 function parseLooseDate(value: string): Date | undefined {
 	const iso = parseIso(value);
 	if (iso) return iso;
-	const local = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:[.,](\d{1,3}))?)?$/.exec(value);
+	const local =
+		/^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:[.,](\d{1,3}))?)?$/.exec(
+			value,
+		);
 	if (!local) return undefined;
 	const date = new Date(
 		`${local[1]}T${local[2]}:${local[3]}:${local[4] ?? "00"}.${(local[5] ?? "0").padEnd(3, "0")}`,
@@ -355,18 +480,28 @@ function parseIso(value: string | undefined): Date | undefined {
 }
 
 function parseOmlxLocalDate(lineText: string): Date | undefined {
-	const match = /^(\d{4}-\d{2}-\d{2}) (\d{2}):(\d{2}):(\d{2}),(\d{3})/.exec(lineText);
+	const match = /^(\d{4}-\d{2}-\d{2}) (\d{2}):(\d{2}):(\d{2}),(\d{3})/.exec(
+		lineText,
+	);
 	if (!match) return undefined;
-	const date = new Date(`${match[1]}T${match[2]}:${match[3]}:${match[4]}.${match[5]}`);
+	const date = new Date(
+		`${match[1]}T${match[2]}:${match[3]}:${match[4]}.${match[5]}`,
+	);
 	return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
-function recentFiles(root: string, start: Date, end: Date, maxDepth: number): Array<{ path: string; mtime: Date; size: number }> {
+function recentFiles(
+	root: string,
+	start: Date,
+	end: Date,
+	maxDepth: number,
+): Array<{ path: string; mtime: Date; size: number }> {
 	const out: Array<{ path: string; mtime: Date; size: number }> = [];
 	const walk = (dir: string, depth: number): void => {
 		if (depth > maxDepth) return;
 		for (const name of safeReadDir(dir)) {
-			if ([".git", "node_modules", "references", "omlx-wiki"].includes(name)) continue;
+			if ([".git", "node_modules", "references", "omlx-wiki"].includes(name))
+				continue;
 			const path = join(dir, name);
 			const stat = safeStat(path);
 			if (!stat) continue;
@@ -374,13 +509,15 @@ function recentFiles(root: string, start: Date, end: Date, maxDepth: number): Ar
 				walk(path, depth + 1);
 				continue;
 			}
-			if (stat.mtime >= start && stat.mtime <= end) out.push({ path, mtime: stat.mtime, size: stat.size });
+			if (stat.mtime >= start && stat.mtime <= end)
+				out.push({ path, mtime: stat.mtime, size: stat.size });
 		}
 	};
 	const stat = safeStat(root);
 	if (!stat) return out;
 	if (stat.isFile()) {
-		if (stat.mtime >= start && stat.mtime <= end) out.push({ path: root, mtime: stat.mtime, size: stat.size });
+		if (stat.mtime >= start && stat.mtime <= end)
+			out.push({ path: root, mtime: stat.mtime, size: stat.size });
 		return out;
 	}
 	walk(root, 0);
@@ -402,13 +539,18 @@ function firstNonFlag(args: string[]): string | undefined {
 function formatLocal(date: Date): string {
 	return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")} ${String(
 		date.getHours(),
-	).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}:${String(date.getSeconds()).padStart(2, "0")}`;
+	).padStart(
+		2,
+		"0",
+	)}:${String(date.getMinutes()).padStart(2, "0")}:${String(date.getSeconds()).padStart(2, "0")}`;
 }
 
 function printSessionSummary(path: string): void {
 	console.log(`\n[session summary: ${path}]`);
 	const lines = readFileSync(path, "utf8").split(/\r?\n/).filter(Boolean);
-	const entries = lines.map(parseJson).filter((value): value is JsonObject => Boolean(asObject(value)));
+	const entries = lines
+		.map(parseJson)
+		.filter((value): value is JsonObject => Boolean(asObject(value)));
 	const header = asObject(entries.find((entry) => entry.type === "session"));
 	line(`lines: ${lines.length}`);
 	if (header) {
@@ -416,13 +558,20 @@ function printSessionSummary(path: string): void {
 		line(`version: ${stringValue(header.version) ?? "(missing)"}`);
 		line(`cwd: ${stringValue(header.cwd) ?? "(missing)"}`);
 		line(`timestamp: ${stringValue(header.timestamp) ?? "(missing)"}`);
-		if (header.parentSession) line(`parentSession: ${stringValue(header.parentSession)}`);
+		if (header.parentSession)
+			line(`parentSession: ${stringValue(header.parentSession)}`);
 	}
-	printCounts("entry types", entries.map((entry) => stringValue(entry.type) ?? "(unknown)"));
+	printCounts(
+		"entry types",
+		entries.map((entry) => stringValue(entry.type) ?? "(unknown)"),
+	);
 	const messages = entries
 		.map((entry) => asObject(entry.message))
 		.filter((message): message is JsonObject => Boolean(message));
-	printCounts("message roles", messages.map((message) => stringValue(message.role) ?? "(unknown)"));
+	printCounts(
+		"message roles",
+		messages.map((message) => stringValue(message.role) ?? "(unknown)"),
+	);
 	const assistantStops = messages
 		.filter((message) => message.role === "assistant")
 		.map((message) => stringValue(message.stopReason))
@@ -431,10 +580,17 @@ function printSessionSummary(path: string): void {
 	const latestModels = entries
 		.filter((entry) => entry.type === "model_change")
 		.slice(-5)
-		.map((entry) => `${stringValue(entry.provider) ?? "?"}/${stringValue(entry.modelId) ?? "?"}`);
-	if (latestModels.length > 0) line(`recent model changes: ${latestModels.join(" -> ")}`);
-	const customMessages = messages.filter((message) => message.role === "custom");
-	if (customMessages.length > 0) line(`custom messages: ${customMessages.length}`);
+		.map(
+			(entry) =>
+				`${stringValue(entry.provider) ?? "?"}/${stringValue(entry.modelId) ?? "?"}`,
+		);
+	if (latestModels.length > 0)
+		line(`recent model changes: ${latestModels.join(" -> ")}`);
+	const customMessages = messages.filter(
+		(message) => message.role === "custom",
+	);
+	if (customMessages.length > 0)
+		line(`custom messages: ${customMessages.length}`);
 }
 
 function printRecentSessionDirs(): void {
@@ -462,10 +618,24 @@ function printProviderDebugSummary(path: string): void {
 		line("no parseable JSON log lines in last 700 lines");
 		return;
 	}
-	printCounts("recent kinds", entries.map((entry) => stringValue(entry.kind) ?? "(unknown)"), 12);
+	printCounts(
+		"recent kinds",
+		entries.map((entry) => stringValue(entry.kind) ?? "(unknown)"),
+		12,
+	);
 	const modelEvents = entries
-		.filter((entry) => ["session_start", "model_select", "before_provider_request", "turn_end"].includes(stringValue(entry.kind) ?? ""))
-		.map((entry) => `${stringValue(entry.kind) ?? "?"}:${stringValue(entry.model) ?? stringValue(entry.selected) ?? "?"}`)
+		.filter((entry) =>
+			[
+				"session_start",
+				"model_select",
+				"before_provider_request",
+				"turn_end",
+			].includes(stringValue(entry.kind) ?? ""),
+		)
+		.map(
+			(entry) =>
+				`${stringValue(entry.kind) ?? "?"}:${stringValue(entry.model) ?? stringValue(entry.selected) ?? "?"}`,
+		)
 		.slice(-16);
 	if (modelEvents.length > 0) {
 		line("recent runtime events:");
@@ -510,8 +680,12 @@ function pathSummary(label: string, path: string): void {
 		line(`${label}: unreadable (${path})`);
 		return;
 	}
-	const link = lstatSync(path).isSymbolicLink() ? ` -> ${safeRealpath(path) ?? "unresolved"}` : "";
-	const kind = stat.isDirectory() ? `${safeReadDir(path).length} entries` : formatBytes(stat.size);
+	const link = lstatSync(path).isSymbolicLink()
+		? ` -> ${safeRealpath(path) ?? "unresolved"}`
+		: "";
+	const kind = stat.isDirectory()
+		? `${safeReadDir(path).length} entries`
+		: formatBytes(stat.size);
 	line(`${label}: ${path}${link} (${kind}, mtime ${stat.mtime.toISOString()})`);
 }
 
@@ -523,7 +697,9 @@ function gitSummary(label: string, cwd: string): void {
 	const branch = safeExec("git", ["-C", cwd, "branch", "--show-current"]);
 	const commit = safeExec("git", ["-C", cwd, "rev-parse", "--short", "HEAD"]);
 	const dirty = safeExec("git", ["-C", cwd, "status", "--short"]);
-	line(`${label}: branch=${branch || "(detached)"} commit=${commit || "(unknown)"} dirty=${dirty ? "yes" : "no"}`);
+	line(
+		`${label}: branch=${branch || "(detached)"} commit=${commit || "(unknown)"} dirty=${dirty ? "yes" : "no"}`,
+	);
 }
 
 function sessionDirForCwd(cwd: string): string {
@@ -536,7 +712,9 @@ function latestFile(dir: string, extension: string): string | undefined {
 	return readdirSync(dir)
 		.map((name) => join(dir, name))
 		.filter((path) => path.endsWith(extension) && safeStat(path)?.isFile())
-		.sort((a, b) => (safeStat(b)?.mtimeMs ?? 0) - (safeStat(a)?.mtimeMs ?? 0))[0];
+		.sort(
+			(a, b) => (safeStat(b)?.mtimeMs ?? 0) - (safeStat(a)?.mtimeMs ?? 0),
+		)[0];
 }
 
 function printCounts(label: string, values: string[], limit = 20): void {
@@ -544,7 +722,9 @@ function printCounts(label: string, values: string[], limit = 20): void {
 	for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
 	if (counts.size === 0) return;
 	line(`${label}:`);
-	for (const [value, count] of [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit)) {
+	for (const [value, count] of [...counts.entries()]
+		.sort((a, b) => b[1] - a[1])
+		.slice(0, limit)) {
 		line(`- ${value}: ${count}`);
 	}
 }
@@ -571,21 +751,28 @@ function parseLogLine(lineText: string): JsonObject | undefined {
 }
 
 function tailLines(path: string, maxLines: number): string[] {
-	return readFileSync(path, "utf8").split(/\r?\n/).filter(Boolean).slice(-maxLines);
+	return readFileSync(path, "utf8")
+		.split(/\r?\n/)
+		.filter(Boolean)
+		.slice(-maxLines);
 }
 
 function findAllOnPath(name: string): string[] {
 	const found: string[] = [];
 	for (const dir of (process.env.PATH ?? "").split(delimiter)) {
 		const candidate = join(dir, name);
-		if (existsSync(candidate) && !found.includes(candidate)) found.push(candidate);
+		if (existsSync(candidate) && !found.includes(candidate))
+			found.push(candidate);
 	}
 	return found;
 }
 
 function safeExec(file: string, args: string[]): string | undefined {
 	try {
-		return execFileSync(file, args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+		return execFileSync(file, args, {
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+		}).trim();
 	} catch {
 		return undefined;
 	}
@@ -616,19 +803,26 @@ function safeRealpath(path: string): string | undefined {
 }
 
 function asObject(value: unknown): JsonObject | undefined {
-	return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : undefined;
+	return value && typeof value === "object" && !Array.isArray(value)
+		? (value as JsonObject)
+		: undefined;
 }
 
 function stringValue(value: unknown): string | undefined {
 	if (typeof value === "string") return value;
-	if (typeof value === "number" || typeof value === "boolean") return String(value);
+	if (typeof value === "number" || typeof value === "boolean")
+		return String(value);
 	return undefined;
 }
 
 function summarizeValue(value: unknown): string {
 	if (Array.isArray(value)) return `[${value.length} items]`;
-	if (asObject(value)) return `{${Object.keys(value as JsonObject).length} keys}`;
-	if (typeof value === "string") return value.includes("key") || value.length > 120 ? "(redacted or long string)" : value;
+	if (asObject(value))
+		return `{${Object.keys(value as JsonObject).length} keys}`;
+	if (typeof value === "string")
+		return value.includes("key") || value.length > 120
+			? "(redacted or long string)"
+			: value;
 	return String(value);
 }
 

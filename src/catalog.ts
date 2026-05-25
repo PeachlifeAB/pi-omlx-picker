@@ -1,6 +1,7 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 export interface OmlxModel {
 	id: string;
@@ -439,6 +440,45 @@ function applyModelSettingsEntry(
 		next.modelType = entry.model_type_override.toLowerCase();
 	next.settingsSummary = summarizeModelSettingsEntry(entry);
 	return next;
+}
+
+const CACHE_FILE = join(getAgentDir(), "cache", "omlx-models.json");
+
+interface CachedCatalog {
+	apiRoot: string;
+	models: OmlxModel[];
+	savedAt: number;
+}
+
+export function readCatalogCache(apiRoot: string): OmlxModel[] | undefined {
+	const data = readCatalogCacheFile();
+	if (!data || data.apiRoot !== apiRoot) return undefined;
+	return data.models;
+}
+
+export function readLastCatalogCache(): OmlxModel[] | undefined {
+	return readCatalogCacheFile()?.models;
+}
+
+function readCatalogCacheFile(): CachedCatalog | undefined {
+	try {
+		const raw = readFileSync(CACHE_FILE, "utf-8");
+		const data = JSON.parse(raw) as CachedCatalog;
+		if (!Array.isArray(data.models)) return undefined;
+		return data;
+	} catch {
+		return undefined;
+	}
+}
+
+export function writeCatalogCache(apiRoot: string, models: OmlxModel[]): void {
+	try {
+		mkdirSync(join(getAgentDir(), "cache"), { recursive: true });
+		const data: CachedCatalog = { apiRoot, models, savedAt: Date.now() };
+		writeFileSync(CACHE_FILE, JSON.stringify(data, null, 2));
+	} catch {
+		// Ignore write errors — cache is best-effort
+	}
 }
 
 export function resolveLocalModelSettingsPath(

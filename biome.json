@@ -1,7 +1,12 @@
 {
 	"root": true,
+	"vcs": {
+		"enabled": true,
+		"clientKind": "git",
+		"useIgnoreFile": true
+	},
 	"files": {
-		"includes": ["src/**/*.ts", "!!**/references", "!!**/.*"]
+		"includes": ["**/*.{ts,json}"]
 	},
 	"formatter": {
 		"enabled": true

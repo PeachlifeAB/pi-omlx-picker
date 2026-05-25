@@ -8,11 +8,11 @@ import {
 	type Model,
 	type SimpleStreamOptions,
 	streamSimpleOpenAICompletions,
-} from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-ai";
 import type {
 	ProviderConfig,
 	ProviderModelConfig,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import type { OmlxModel } from "./catalog.ts";
 
 // Pi's documented defaults when the server doesn't report per-model values.

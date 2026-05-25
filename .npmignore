@@ -4,6 +4,9 @@
 .claude/
 .codex/
 .pi/
+.pi-lens/
+.agents/
+.ai/
 references/
 log/
 docs/
@@ -21,11 +24,22 @@ AGENTS.override.md
 CLAUDE*.md
 DESIGN.md
 
+# assets
+.assets/
+
 # config/env
 .env*
+.biomeignore
 biome.json
 mise.toml
 tsconfig.json
+vitest.config.ts
+
+# docs
+CONTRIBUTING.md
+
+# ci
+.github/
 
 # misc
 .DS_Store
