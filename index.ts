@@ -6,6 +6,9 @@ import {
 } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { PROVIDER_KEY } from "./src/auth-storage.ts";
+import { loadDotenvFromExtensionDir } from "./src/dotenv.ts";
+
+loadDotenvFromExtensionDir(import.meta.url);
 import {
 	fetchModels,
 	type OmlxModel,

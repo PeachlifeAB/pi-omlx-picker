@@ -29,6 +29,7 @@ DESIGN.md
 
 # config/env
 .env*
+.markdownlint.json
 .biomeignore
 biome.json
 mise.toml

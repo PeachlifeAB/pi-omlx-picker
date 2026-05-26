@@ -1,6 +1,8 @@
 node_modules/
 .env
+*.tgz
 package-lock.json
 CONTEXT.md
 /.ai
 pi-wiki
+.DS_Store
