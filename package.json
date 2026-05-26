@@ -1,6 +1,6 @@
 {
 	"name": "pi-omlx-picker",
-	"version": "0.2.3",
+	"version": "0.2.4",
 	"type": "module",
 	"description": "Pi extension that discovers models from a local OMLX server and registers them as a native Pi provider.",
 	"license": "MIT",
