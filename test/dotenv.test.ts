@@ -26,6 +26,10 @@ describe("mergeDotenv", () => {
 	it("sets missing and empty keys but does not overwrite non-empty ones", () => {
 		const env: NodeJS.ProcessEnv = { EXISTING: "keep", EMPTY: "" };
 		mergeDotenv({ EXISTING: "new", EMPTY: "filled", FRESH: "set" }, env);
-		expect(env).toMatchObject({ EXISTING: "keep", EMPTY: "filled", FRESH: "set" });
+		expect(env).toMatchObject({
+			EXISTING: "keep",
+			EMPTY: "filled",
+			FRESH: "set",
+		});
 	});
 });

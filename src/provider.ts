@@ -37,7 +37,7 @@ export function toProviderConfig(
 ): ProviderConfig {
 	return {
 		baseUrl: apiRoot,
-		apiKey: apiKeyEnvVar,
+		apiKey: `$${apiKeyEnvVar}`,
 		api: "openai-completions",
 		authHeader: true,
 		streamSimple: (model, context, options) =>

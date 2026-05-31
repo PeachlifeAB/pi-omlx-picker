@@ -2,6 +2,12 @@ import { strict as assert } from "node:assert";
 import { test } from "vitest";
 import { toProviderConfig } from "../src/provider.ts";
 
+test("toProviderConfig marks apiKey env var references explicitly", () => {
+	const config = toProviderConfig("http://example.test/v1", "OMLX_API_KEY", []);
+
+	assert.equal(config.apiKey, "$OMLX_API_KEY");
+});
+
 test("toProviderConfig marks only explicit thinking_default true as reasoning capable", () => {
 	const config = toProviderConfig("http://example.test/v1", "OMLX_API_KEY", [
 		{ id: "qwen", thinkingDefault: true },
