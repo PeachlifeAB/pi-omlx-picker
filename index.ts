@@ -5,7 +5,7 @@ import {
 	type Model,
 } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { PROVIDER_KEY } from "./src/auth-storage.ts";
+import { PROVIDER_KEY, loadOmlxCredential, saveOmlxCredential } from "./src/auth-storage.ts";
 import { loadDotenvFromExtensionDir } from "./src/dotenv.ts";
 
 loadDotenvFromExtensionDir(import.meta.url);
@@ -83,6 +83,21 @@ export default function (pi: ExtensionAPI): void {
 	pi.on("session_shutdown", () => {
 		state.stopped = true;
 		delete globalState[EXTENSION_SINGLETON_KEY];
+	});
+
+	pi.registerCommand("omlx-base-url", {
+		description: "Configure OMLX base URL",
+		handler: async (_args, ctx) => {
+			const stored = loadOmlxCredential();
+			const currentUrl = stored?.baseUrl ?? DEFAULT_OMLX_BASE_URL;
+
+			const url = await ctx.ui.input("OMLX base URL:", currentUrl);
+			if (!url) return;
+
+			saveOmlxCredential(url, stored?.apiKey ?? "");
+			ctx.ui.notify(`Base URL saved to ${currentUrl} → ${url}`);
+			state.lastError = undefined;
+		},
 	});
 }
 
