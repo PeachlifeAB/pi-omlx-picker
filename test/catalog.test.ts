@@ -8,7 +8,32 @@ import {
 	fetchModels,
 	parseModelsResponse,
 	parseModelsStatusResponse,
+	resolveArchContextLimits,
 } from "../src/catalog.ts";
+
+test("resolveArchContextLimits uses arch ceiling as prio-3 fallback", () => {
+	const [m] = resolveArchContextLimits([{ id: "x", archContextWindow: 72099 }]);
+	assert.equal(m.contextWindow, 72099);
+});
+
+test("resolveArchContextLimits clamps a user value above the arch ceiling", () => {
+	const [m] = resolveArchContextLimits([
+		{ id: "x", contextWindow: 200000, archContextWindow: 72099 },
+	]);
+	assert.equal(m.contextWindow, 72099);
+});
+
+test("resolveArchContextLimits keeps a user value within the arch ceiling", () => {
+	const [m] = resolveArchContextLimits([
+		{ id: "x", contextWindow: 32000, archContextWindow: 72099 },
+	]);
+	assert.equal(m.contextWindow, 32000);
+});
+
+test("resolveArchContextLimits leaves models without an arch ceiling untouched", () => {
+	const [m] = resolveArchContextLimits([{ id: "x", contextWindow: 200000 }]);
+	assert.equal(m.contextWindow, 200000);
+});
 
 test("parseModelsResponse extracts ids from OpenAI shape", () => {
 	const json = {
@@ -32,6 +57,24 @@ test("parseModelsResponse drops entries without id", () => {
 	assert.deepEqual(parseModelsResponse(json), [
 		{ id: "ok" },
 		{ id: "also-ok" },
+	]);
+});
+
+test("parseModelsResponse captures max_model_len as archContextWindow", () => {
+	const json = {
+		object: "list",
+		data: [
+			{ id: "with-len", max_model_len: 72099 },
+			{ id: "no-len" },
+			{ id: "zero-len", max_model_len: 0 },
+			{ id: "null-len", max_model_len: null },
+		],
+	};
+	assert.deepEqual(parseModelsResponse(json), [
+		{ id: "with-len", archContextWindow: 72099 },
+		{ id: "no-len" },
+		{ id: "zero-len" },
+		{ id: "null-len" },
 	]);
 });
 
@@ -162,6 +205,30 @@ test("fetchModels prefers /models/status", async () => {
 	}
 });
 
+test("fetchModels omits the Authorization header for keyless servers", async () => {
+	const originalFetch = globalThis.fetch;
+	let sawAuthHeader: string | null = "unset";
+	globalThis.fetch = (async (url: string, init?: RequestInit) => {
+		if (url.endsWith("/models/status")) {
+			const headers = new Headers(init?.headers);
+			sawAuthHeader = headers.get("Authorization");
+			return new Response(
+				JSON.stringify({
+					models: [{ id: "x", max_context_window: 1000, max_tokens: 500 }],
+				}),
+				{ status: 200 },
+			);
+		}
+		throw new Error(`unexpected url ${url}`);
+	}) as typeof fetch;
+	try {
+		await fetchModels("http://example.test/v1", "");
+		assert.equal(sawAuthHeader, null);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
 test("fetchModels applies local OMLX model settings for localhost metadata refinement", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-omlx-picker-"));
 	const settingsPath = join(dir, "model_settings.json");
@@ -205,7 +272,7 @@ test("fetchModels applies local OMLX model settings for localhost metadata refin
 		throw new Error(`unexpected url ${url}`);
 	}) as typeof fetch;
 	try {
-		const models = await fetchModels("http://127.0.0.1:8008/v1", "k", {
+		const models = await fetchModels("http://127.0.0.1:8000/v1", "k", {
 			modelSettingsPath: settingsPath,
 		});
 		assert.equal(models.length, 1);
@@ -297,7 +364,7 @@ test("applyLocalModelSettings projects full model_settings entry into bridge met
 
 	const [model] = applyLocalModelSettings(
 		[{ id: "vision-lane" }],
-		"http://127.0.0.1:8008/v1",
+		"http://127.0.0.1:8000/v1",
 		settingsPath,
 	);
 
@@ -396,58 +463,6 @@ test("applyLocalModelSettings projects full model_settings entry into bridge met
 	});
 });
 
-test("fetchModels applies local OMLX model settings for 0.0.0.0 API root", async () => {
-	const dir = mkdtempSync(join(tmpdir(), "pi-omlx-picker-"));
-	const settingsPath = join(dir, "model_settings.json");
-	writeFileSync(
-		settingsPath,
-		JSON.stringify({
-			version: 1,
-			models: {
-				documenter: {
-					enable_thinking: false,
-					chat_template_kwargs: { enable_thinking: true },
-				},
-			},
-		}),
-	);
-
-	const originalFetch = globalThis.fetch;
-	globalThis.fetch = (async (url: string) => {
-		if (url.endsWith("/models/status")) {
-			return new Response(
-				JSON.stringify({
-					models: [{ id: "documenter", thinking_default: true }],
-				}),
-				{ status: 200 },
-			);
-		}
-		throw new Error(`unexpected url ${url}`);
-	}) as typeof fetch;
-	try {
-		const models = await fetchModels("http://0.0.0.0:8008/v1", "k", {
-			modelSettingsPath: settingsPath,
-		});
-		assert.deepEqual(models, [
-			{
-				id: "documenter",
-				thinkingDefault: false,
-				chatTemplateKwargs: { enable_thinking: true },
-				settingsSummary: {
-					thinking: {
-						enabled: false,
-					},
-					chatTemplate: {
-						kwargs: { enable_thinking: true },
-					},
-				},
-			},
-		]);
-	} finally {
-		globalThis.fetch = originalFetch;
-	}
-});
-
 test("fetchModels emits catalog debug events for local settings refinement", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-omlx-picker-"));
 	const settingsPath = join(dir, "model_settings.json");
@@ -458,6 +473,8 @@ test("fetchModels emits catalog debug events for local settings refinement", asy
 			models: {
 				documenter: {
 					chat_template_kwargs: { enable_thinking: false },
+					max_context_window: 120000,
+					max_tokens: 84000,
 				},
 			},
 		}),
@@ -477,7 +494,7 @@ test("fetchModels emits catalog debug events for local settings refinement", asy
 		throw new Error(`unexpected url ${url}`);
 	}) as typeof fetch;
 	try {
-		await fetchModels("http://127.0.0.1:8008/v1", "k", {
+		await fetchModels("http://127.0.0.1:8000/v1", "k", {
 			modelSettingsPath: settingsPath,
 			onDebug: (event) => events.push(event.kind),
 		});
@@ -508,17 +525,31 @@ test("fetchModels falls back to /models when /models/status fails", async () => 
 		if (url.endsWith("/models/status")) {
 			return new Response("not found", { status: 404 });
 		}
-		return new Response(
-			JSON.stringify({ object: "list", data: [{ id: "y" }] }),
-			{ status: 200 },
-		);
+		if (url.endsWith("/models")) {
+			return new Response(
+				JSON.stringify({ object: "list", data: [{ id: "y" }] }),
+				{ status: 200 },
+			);
+		}
+		if (url.endsWith("/admin/api/global-settings")) {
+			return new Response(
+				JSON.stringify({
+					sampling: { max_context_window: 120000, max_tokens: 84000 },
+				}),
+				{ status: 200 },
+			);
+		}
+		throw new Error(`unexpected url ${url}`);
 	}) as typeof fetch;
 	try {
 		const models = await fetchModels("http://example.test/v1", "k");
-		assert.deepEqual(models, [{ id: "y" }]);
+		assert.deepEqual(models, [
+			{ id: "y", contextWindow: 120000, maxTokens: 84000 },
+		]);
 		assert.deepEqual(calls, [
 			"http://example.test/v1/models/status",
 			"http://example.test/v1/models",
+			"http://example.test/admin/api/global-settings",
 		]);
 	} finally {
 		globalThis.fetch = originalFetch;

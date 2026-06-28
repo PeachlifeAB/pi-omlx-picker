@@ -10,6 +10,8 @@ export interface OmlxModel {
 	modelAlias?: string;
 	contextWindow?: number;
 	maxTokens?: number;
+	/** Model architectural ceiling (`max_model_len`). Prio-3 fallback and clamp limit. */
+	archContextWindow?: number;
 	thinkingDefault?: boolean | null;
 	taskBudgetTokens?: number;
 	maxToolResultTokens?: number;
@@ -36,7 +38,7 @@ export interface CatalogDebugEvent {
 
 interface OpenAIModelsResponse {
 	object: string;
-	data: Array<{ id: string; object?: string }>;
+	data: Array<{ id: string; object?: string; max_model_len?: number | null }>;
 }
 
 interface OmlxModelsStatusResponse {
@@ -69,6 +71,18 @@ interface OmlxModelsStatusResponse {
 	}>;
 }
 
+interface OmlxGlobalSettingsResponse {
+	sampling?: {
+		max_context_window?: number;
+		max_tokens?: number;
+	};
+}
+
+interface OmlxGlobalDefaults {
+	contextWindow?: number;
+	maxTokens?: number;
+}
+
 export function parseModelsResponse(json: unknown): OmlxModel[] {
 	const r = json as OpenAIModelsResponse | undefined;
 	if (!r || !Array.isArray(r.data)) {
@@ -80,7 +94,10 @@ export function parseModelsResponse(json: unknown): OmlxModel[] {
 		if (!entry || typeof entry.id !== "string" || !entry.id) continue;
 		if (seen.has(entry.id)) continue;
 		seen.add(entry.id);
-		out.push({ id: entry.id });
+		const m: OmlxModel = { id: entry.id };
+		if (typeof entry.max_model_len === "number" && entry.max_model_len > 0)
+			m.archContextWindow = entry.max_model_len;
+		out.push(m);
 	}
 	return out;
 }
@@ -190,11 +207,21 @@ export async function fetchModels(
 				documenter: models.find((m) => m.id === "qwen3.6-8b-documenter"),
 			},
 		});
-		return applyLocalModelSettings(
+		models = applyLocalModelSettings(
 			models,
 			apiRoot,
 			opts.modelSettingsPath,
 			opts.onDebug,
+		);
+		return resolveArchContextLimits(
+			await applyApiGlobalDefaultsIfNeeded(
+				models,
+				apiRoot,
+				apiKey,
+				opts.signal,
+				timeoutMs,
+				opts.onDebug,
+			),
 		);
 	} catch (err) {
 		if (err instanceof Error && err.name === "AbortError") throw err;
@@ -219,12 +246,105 @@ export async function fetchModels(
 		kind: "catalog_models_loaded",
 		details: { apiRoot, count: models.length },
 	});
-	return applyLocalModelSettings(
+	models = applyLocalModelSettings(
 		models,
 		apiRoot,
 		opts.modelSettingsPath,
 		opts.onDebug,
 	);
+	return resolveArchContextLimits(
+		await applyApiGlobalDefaultsIfNeeded(
+			models,
+			apiRoot,
+			apiKey,
+			opts.signal,
+			timeoutMs,
+			opts.onDebug,
+		),
+	);
+}
+
+/**
+ * Final context-window resolution, applied after model-specific (prio 1) and
+ * global (prio 2) settings. The model's architectural ceiling
+ * (`archContextWindow`, from `max_model_len`) is the prio-3 fallback when no
+ * user setting exists, and the hard clamp when a user setting exceeds it.
+ */
+export function resolveArchContextLimits(models: OmlxModel[]): OmlxModel[] {
+	return models.map((model) => {
+		const arch = model.archContextWindow;
+		if (arch == null) return model;
+		const next: OmlxModel = { ...model };
+		if (next.contextWindow == null) next.contextWindow = arch;
+		else if (next.contextWindow > arch) next.contextWindow = arch;
+		return next;
+	});
+}
+
+async function applyApiGlobalDefaultsIfNeeded(
+	models: OmlxModel[],
+	apiRoot: string,
+	apiKey: string,
+	signal: AbortSignal | undefined,
+	timeoutMs: number,
+	onDebug?: (event: CatalogDebugEvent) => void,
+): Promise<OmlxModel[]> {
+	if (!models.some((m) => m.contextWindow == null || m.maxTokens == null))
+		return models;
+	let defaults: OmlxGlobalDefaults | undefined;
+	try {
+		defaults = await fetchGlobalDefaults(apiRoot, apiKey, signal, timeoutMs);
+		onDebug?.({
+			kind: "catalog_global_settings_loaded",
+			details: { apiRoot, defaults },
+		});
+	} catch (err) {
+		if (signal?.aborted) throw err;
+		onDebug?.({
+			kind: "catalog_global_settings_failed",
+			details: {
+				apiRoot,
+				error: err instanceof Error ? err.message : String(err),
+			},
+		});
+		return models;
+	}
+	if (defaults.contextWindow == null && defaults.maxTokens == null)
+		return models;
+	return models.map((model) => {
+		const next: OmlxModel = { ...model };
+		if (next.contextWindow == null && defaults.contextWindow != null)
+			next.contextWindow = defaults.contextWindow;
+		if (next.maxTokens == null && defaults.maxTokens != null)
+			next.maxTokens = defaults.maxTokens;
+		return next;
+	});
+}
+
+async function fetchGlobalDefaults(
+	apiRoot: string,
+	apiKey: string,
+	parent: AbortSignal | undefined,
+	timeoutMs: number,
+): Promise<OmlxGlobalDefaults> {
+	const base = apiRoot.replace(/\/v1\/?$/, "").replace(/\/+$/, "");
+	const json = (await getJson(
+		`${base}/admin/api/global-settings`,
+		apiKey,
+		parent,
+		timeoutMs,
+	)) as OmlxGlobalSettingsResponse;
+	const sampling = asRecord(json?.sampling);
+	return {
+		contextWindow:
+			typeof sampling?.max_context_window === "number"
+				? sampling.max_context_window
+				: undefined,
+		maxTokens:
+			typeof sampling?.max_tokens === "number"
+				? sampling.max_tokens
+				: undefined,
+	};
 }
 
 async function getJson(
@@ -234,8 +354,10 @@ async function getJson(
 	timeoutMs: number,
 ): Promise<unknown> {
 	const signal = withTimeout(parent, timeoutMs);
+	// Empty key => keyless server (skip_api_key_verification): omit the header.
+	const headers = apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined;
 	const res = await fetch(url, {
-		headers: { Authorization: `Bearer ${apiKey}` },
+		headers,
 		signal,
 	}).catch((err) => {
 		if (err instanceof Error && err.name === "AbortError") {

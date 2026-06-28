@@ -2,12 +2,48 @@ import { strict as assert } from "node:assert";
 import { test } from "vitest";
 import { toProviderConfig } from "../src/provider.ts";
 
+test("toProviderConfig marks apiKey env var references explicitly", () => {
+	const config = toProviderConfig("http://example.test/v1", "OMLX_API_KEY", []);
+
+	assert.equal(config.apiKey, "$OMLX_API_KEY");
+	assert.equal(config.authHeader, true);
+});
+
+test("toProviderConfig omits apiKey and auth header for keyless servers", () => {
+	const config = toProviderConfig(
+		"http://example.test/v1",
+		"OMLX_API_KEY",
+		[],
+		undefined,
+		{ keyless: true },
+	);
+
+	assert.equal(config.apiKey, undefined);
+	assert.equal(config.authHeader, false);
+});
+
 test("toProviderConfig marks only explicit thinking_default true as reasoning capable", () => {
 	const config = toProviderConfig("http://example.test/v1", "OMLX_API_KEY", [
-		{ id: "qwen", thinkingDefault: true },
-		{ id: "gemma", thinkingDefault: false },
-		{ id: "plain" },
-		{ id: "no-toggle", thinkingDefault: null },
+		{
+			id: "qwen",
+			thinkingDefault: true,
+			reasoningParser: "qwen",
+			contextWindow: 32768,
+			maxTokens: 8192,
+		},
+		{
+			id: "gemma",
+			thinkingDefault: false,
+			contextWindow: 32768,
+			maxTokens: 8192,
+		},
+		{ id: "plain", contextWindow: 32768, maxTokens: 8192 },
+		{
+			id: "no-toggle",
+			thinkingDefault: null,
+			contextWindow: 32768,
+			maxTokens: 8192,
+		},
 	]);
 
 	assert.equal(config.models?.[0]?.reasoning, true);
@@ -47,6 +83,8 @@ test("toProviderConfig maps displayName to Pi name and keeps OMLX-only settings 
 			id: "raw-model-id",
 			displayName: "Human Model Name",
 			description: "Shown in /omlx-status only",
+			contextWindow: 32768,
+			maxTokens: 8192,
 			taskBudgetTokens: 64000,
 			maxToolResultTokens: 4096,
 			settingsSummary: { sampling: { temperature: 0.2 } },

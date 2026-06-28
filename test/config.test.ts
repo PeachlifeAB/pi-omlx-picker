@@ -8,6 +8,7 @@ import {
 import {
 	applyStoredCredentialToEnv,
 	DEFAULT_OMLX_BASE_URL,
+	hasOmlxTarget,
 	loadConfig,
 	normalizeBaseUrl,
 	resolveConfiguredApiKey,
@@ -90,6 +91,23 @@ test("resolveConfiguredApiKey does not mix env base URL with stored key", () => 
 		resolveConfiguredApiKey({ OMLX_BASE_URL: "https://shell/v1" }),
 		undefined,
 	);
+});
+
+test("hasOmlxTarget is true with an env API key", () => {
+	assert.equal(hasOmlxTarget({ OMLX_API_KEY: "shell-k" }), true);
+});
+
+test("hasOmlxTarget is true with an env base URL but no key (keyless)", () => {
+	assert.equal(hasOmlxTarget({ OMLX_BASE_URL: "http://localhost:8000" }), true);
+});
+
+test("hasOmlxTarget is true when only a stored credential exists", () => {
+	saveOmlxCredential("https://stored/v1", "stored-k");
+	assert.equal(hasOmlxTarget({}), true);
+});
+
+test("hasOmlxTarget is false with no key, no base URL, no stored creds", () => {
+	assert.equal(hasOmlxTarget({}), false);
 });
 
 test("applyStoredCredentialToEnv returns false when no stored creds", () => {

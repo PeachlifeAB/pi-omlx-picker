@@ -34,6 +34,18 @@ export function resolveConfiguredApiKey(
 	return loadOmlxCredential()?.apiKey;
 }
 
+/**
+ * True when the user has pointed us at a server even without an API key.
+ * OMLX servers run with `skip_api_key_verification: true` need no key; an
+ * explicit base URL (env or stored) is the signal that a keyless server is
+ * intended. With neither key nor base URL there is nothing to talk to.
+ */
+export function hasOmlxTarget(env: NodeJS.ProcessEnv = process.env): boolean {
+	if (env.OMLX_API_KEY || env.OMLX_BASE_URL) return true;
+	const stored = loadOmlxCredential();
+	return Boolean(stored?.apiKey || stored?.baseUrl);
+}
+
 // Legacy helper for older stored api_key credentials. Never fills only one side
 // of the env pair; partial shell overrides remain explicit shell state.
 export function applyStoredCredentialToEnv(

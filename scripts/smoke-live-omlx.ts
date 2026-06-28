@@ -6,7 +6,7 @@ import {
 } from "../src/smoke-model-selection.ts";
 
 const baseUrl = normalizeBaseUrl(
-	process.env.OMLX_BASE_URL ?? "http://127.0.0.1:8008/v1",
+	process.env.OMLX_BASE_URL ?? "http://127.0.0.1:8000/v1",
 );
 const apiKey = process.env.OMLX_API_KEY ?? "local-smoke";
 const logDir = join(process.cwd(), "log", "smoke-test");

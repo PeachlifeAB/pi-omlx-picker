@@ -1,11 +1,15 @@
 {
 	"name": "pi-omlx-picker",
-	"version": "0.2.3",
+	"version": "0.3.0",
 	"type": "module",
 	"description": "Pi extension that discovers models from a local OMLX server and registers them as a native Pi provider.",
 	"license": "MIT",
 	"keywords": [
-		"pi-package"
+		"pi-package",
+		"omlx",
+		"pi",
+		"picker",
+		"model"
 	],
 	"engines": {
 		"node": ">=22"
@@ -16,8 +20,14 @@
 		"typecheck": "tsc --noEmit",
 		"test": "vitest run",
 		"test:watch": "vitest",
-		"publish": "npm publish --access public"
+		"release": "npm publish --access public"
 	},
+	"files": [
+		"index.ts",
+		"src",
+		"README.md",
+		"LICENSE"
+	],
 	"pi": {
 		"extensions": [
 			"./index.ts"
@@ -28,12 +38,17 @@
 		"@earendil-works/pi-coding-agent": "*"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^2.4.15",
-		"@earendil-works/pi-ai": "0.75.5",
-		"@earendil-works/pi-coding-agent": "0.75.5",
-		"@types/node": "^22.19.19",
-		"tsx": "^4.22.3",
-		"typescript": "^6.0.3",
-		"vitest": "^4.1.7"
+		"@biomejs/biome": "latest",
+		"@types/node": "latest",
+		"tsx": "latest",
+		"typescript": "latest",
+		"vitest": "latest"
+	},
+	"allowScripts": {
+		"@google/genai@1.52.0": true,
+		"protobufjs@7.5.9": true,
+		"protobufjs@7.6.4": true,
+		"esbuild@0.28.1": true,
+		"fsevents@2.3.3": true
 	}
 }

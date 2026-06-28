@@ -6,3 +6,5 @@ CONTEXT.md
 /.ai
 pi-wiki
 .DS_Store
+# Local Pi runtime state
+.atl/

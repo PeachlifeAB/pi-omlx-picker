@@ -9,6 +9,7 @@ import { PROVIDER_KEY } from "./src/auth-storage.ts";
 import { loadDotenvFromExtensionDir } from "./src/dotenv.ts";
 
 loadDotenvFromExtensionDir(import.meta.url);
+
 import {
 	fetchModels,
 	type OmlxModel,
@@ -19,6 +20,7 @@ import {
 } from "./src/catalog.ts";
 import {
 	DEFAULT_OMLX_BASE_URL,
+	hasOmlxTarget,
 	loadConfig,
 	type OmlxConfig,
 	resolveConfiguredApiKey,
@@ -33,11 +35,6 @@ const STARTUP_TIMEOUT_MS = 2_000;
 const POLL_INTERVAL_MS = 10 * 60 * 1000;
 const BACKOFF_BASE_MS = 2_000;
 const BACKOFF_MAX_MS = 60_000;
-
-const SETUP_MODEL: OmlxModel = {
-	id: "setup",
-	displayName: "OMLX (run /login)",
-};
 
 interface State {
 	config: OmlxConfig | undefined;
@@ -119,9 +116,18 @@ function registerModels(
 	models: OmlxModel[],
 	modelSettingsPath?: string,
 ): void {
+	const keyless = !resolveConfiguredApiKey();
 	pi.registerProvider(PROVIDER, {
 		name: "OMLX",
-		...toProviderConfig(config.apiRoot, config.apiKeyEnvVar, models),
+		...toProviderConfig(
+			config.apiRoot,
+			config.apiKeyEnvVar,
+			models,
+			undefined,
+			{
+				keyless,
+			},
+		),
 	});
 	state.config = config;
 	state.catalog = models;
@@ -131,23 +137,52 @@ function registerModels(
 	state.modelSettingsPath = modelSettingsPath;
 }
 
+function isRegistrableModel(model: OmlxModel): boolean {
+	return (
+		typeof model.contextWindow === "number" &&
+		model.contextWindow > 0 &&
+		typeof model.maxTokens === "number" &&
+		model.maxTokens > 0
+	);
+}
+
+function registrableCachedModels(
+	models: OmlxModel[] | undefined,
+): OmlxModel[] | undefined {
+	const registrable = models?.filter(isRegistrableModel) ?? [];
+	return registrable.length > 0 ? registrable : undefined;
+}
+
+function missingLimitModelIds(models: OmlxModel[]): string[] {
+	return models.filter((model) => !isRegistrableModel(model)).map((m) => m.id);
+}
+
 function registerCachedOrSetupModels(pi: ExtensionAPI, state: State): void {
 	const config = tryLoadConfig() ?? {
 		apiRoot: DEFAULT_OMLX_BASE_URL,
 		apiKeyEnvVar: "OMLX_API_KEY",
 	};
-	const cached = readCatalogCache(config.apiRoot);
-	const fallbackCached = resolveConfiguredApiKey()
+	const configured = resolveConfiguredApiKey() || hasOmlxTarget();
+	const cached = registrableCachedModels(readCatalogCache(config.apiRoot));
+	const fallbackCached = configured
 		? undefined
-		: readLastCatalogCache();
-	const models =
-		cached && cached.length > 0
-			? cached
-			: fallbackCached && fallbackCached.length > 0
-				? fallbackCached
-				: [SETUP_MODEL];
+		: registrableCachedModels(readLastCatalogCache());
+	const models = cached ?? fallbackCached;
+	if (!models) {
+		state.config = config;
+		state.catalog = [];
+		state.registered = false;
+		state.lastError = configured
+			? "No cached OMLX models with real max_context_window/max_tokens; waiting for live catalog refresh."
+			: "OMLX credentials are not set. Run /login and choose OMLX.";
+		state.lastRefreshAt = new Date().toISOString();
+		state.modelSettingsPath = undefined;
+		return;
+	}
 
-	if (resolveConfiguredApiKey()) {
+	// A key OR a configured base URL (keyless server) is enough to register the
+	// real provider. Pi omits the auth header when the resolved key is empty.
+	if (configured) {
 		registerModels(pi, state, config, models);
 		return;
 	}
@@ -204,7 +239,7 @@ async function refreshProvider(
 ): Promise<RefreshResult> {
 	const config = loadConfig();
 	const apiKey = resolveConfiguredApiKey();
-	if (!apiKey) {
+	if (!apiKey && !hasOmlxTarget()) {
 		state.lastError = "OMLX credentials are not set";
 		return "not_configured";
 	}
@@ -215,7 +250,7 @@ async function refreshProvider(
 
 	let models: OmlxModel[];
 	try {
-		models = await fetchModels(config.apiRoot, apiKey, {
+		models = await fetchModels(config.apiRoot, apiKey ?? "", {
 			modelSettingsPath,
 			timeoutMs: opts.timeoutMs,
 		});
@@ -224,13 +259,19 @@ async function refreshProvider(
 		return "failed";
 	}
 
-	if (models.length === 0) {
-		state.lastError = "OMLX returned 0 models";
+	const missingLimitIds = missingLimitModelIds(models);
+	const registrable = models.filter(isRegistrableModel);
+
+	if (registrable.length === 0) {
+		state.lastError =
+			missingLimitIds.length > 0
+				? `No OMLX models have max_context_window and max_tokens (${missingLimitIds.length} models missing limits)`
+				: "OMLX returned 0 models";
 		return "failed";
 	}
 
-	writeCatalogCache(config.apiRoot, models);
-	registerModels(pi, state, config, models, modelSettingsPath);
+	writeCatalogCache(config.apiRoot, registrable);
+	registerModels(pi, state, config, registrable, modelSettingsPath);
 	return "registered";
 }
 
