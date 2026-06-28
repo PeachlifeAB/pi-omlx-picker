@@ -27,19 +27,6 @@ export function isThinkingEvent(event: AssistantMessageEvent): boolean {
 	);
 }
 
-export function mergeAbortSignals(
-	parent: AbortSignal | undefined,
-	child: AbortSignal,
-): AbortSignal {
-	if (!parent) return child;
-	if (parent.aborted) return parent;
-	const controller = new AbortController();
-	const abort = () => controller.abort();
-	parent.addEventListener("abort", abort, { once: true });
-	child.addEventListener("abort", abort, { once: true });
-	return controller.signal;
-}
-
 export function eventPartial(
 	event: AssistantMessageEvent,
 	model: Model<Api>,
