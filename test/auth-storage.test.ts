@@ -52,6 +52,20 @@ test("load reads legacy oauth-shaped OMLX credential", () => {
 	});
 });
 
+test("load reads keyless oauth-shaped credential (baseUrl only, empty access)", () => {
+	inMemory.set(PROVIDER_KEY, {
+		type: "oauth",
+		access: "",
+		refresh: "",
+		expires: Number.POSITIVE_INFINITY,
+		baseUrl: "https://omlx.example.com/v1",
+	});
+	assert.deepEqual(loadOmlxCredential(), {
+		baseUrl: "https://omlx.example.com/v1",
+		apiKey: "",
+	});
+});
+
 test("save preserves sibling provider entries", () => {
 	inMemory.set("anthropic", {
 		type: "oauth",

@@ -7,6 +7,11 @@ import {
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { PROVIDER_KEY } from "./src/auth-storage.ts";
 import { loadDotenvFromExtensionDir } from "./src/dotenv.ts";
+import {
+	createLoginOmlx,
+	getOmlxApiKey,
+	refreshOmlxToken,
+} from "./src/oauth-login.ts";
 
 loadDotenvFromExtensionDir(import.meta.url);
 
@@ -109,6 +114,31 @@ function tryLoadConfig(): OmlxConfig | undefined {
 	}
 }
 
+// Attached to every registerProvider call so "Use a subscription" in pi's
+// native /login always offers OMLX with a base-URL prompt (e.g. a Tailscale
+// host) followed by an API key prompt. "Use an API key" only asks for a key.
+// The oauth login itself fetches and registers the real catalog before
+// returning, so pi's post-login modelRegistry.refresh() sees real models
+// immediately instead of the startup placeholder.
+function buildOmlxOauth(pi: ExtensionAPI, state: State) {
+	return {
+		name: "OMLX",
+		login: createLoginOmlx(async (baseUrl, apiKey) => {
+			const result = await fetchAndRegister(
+				pi,
+				state,
+				{ apiRoot: baseUrl, apiKeyEnvVar: "OMLX_API_KEY" },
+				apiKey,
+			);
+			return result === "registered"
+				? { ok: true as const }
+				: { ok: false as const, error: state.lastError ?? "unknown error" };
+		}),
+		refreshToken: refreshOmlxToken,
+		getApiKey: getOmlxApiKey,
+	};
+}
+
 function registerModels(
 	pi: ExtensionAPI,
 	state: State,
@@ -119,6 +149,7 @@ function registerModels(
 	const keyless = !resolveConfiguredApiKey();
 	pi.registerProvider(PROVIDER, {
 		name: "OMLX",
+		oauth: buildOmlxOauth(pi, state),
 		...toProviderConfig(
 			config.apiRoot,
 			config.apiKeyEnvVar,
@@ -157,6 +188,17 @@ function missingLimitModelIds(models: OmlxModel[]): string[] {
 	return models.filter((model) => !isRegistrableModel(model)).map((m) => m.id);
 }
 
+// Placeholder registered when nothing else is available yet, purely so "omlx"
+// appears in pi's native /login list (built from already-registered models —
+// see registerCachedOrSetupModels). Never used to stream: the login flow
+// stores credentials and the next poll replaces this with the real catalog.
+const PLACEHOLDER_MODEL: OmlxModel = {
+	id: "omlx-placeholder",
+	displayName: "OMLX (configure via /login)",
+	contextWindow: 1,
+	maxTokens: 1,
+};
+
 function registerCachedOrSetupModels(pi: ExtensionAPI, state: State): void {
 	const config = tryLoadConfig() ?? {
 		apiRoot: DEFAULT_OMLX_BASE_URL,
@@ -177,6 +219,15 @@ function registerCachedOrSetupModels(pi: ExtensionAPI, state: State): void {
 			: "OMLX credentials are not set. Run /login and choose OMLX.";
 		state.lastRefreshAt = new Date().toISOString();
 		state.modelSettingsPath = undefined;
+		pi.registerProvider(PROVIDER, {
+			...toProviderConfig(config.apiRoot, config.apiKeyEnvVar, [
+				PLACEHOLDER_MODEL,
+			]),
+			name: "OMLX",
+			oauth: buildOmlxOauth(pi, state),
+			authHeader: false,
+			streamSimple: streamMissingCredentials,
+		});
 		return;
 	}
 
@@ -190,6 +241,7 @@ function registerCachedOrSetupModels(pi: ExtensionAPI, state: State): void {
 	pi.registerProvider(PROVIDER, {
 		...toProviderConfig(config.apiRoot, config.apiKeyEnvVar, models),
 		name: "OMLX",
+		oauth: buildOmlxOauth(pi, state),
 		authHeader: false,
 		streamSimple: streamMissingCredentials,
 	});
@@ -243,14 +295,30 @@ async function refreshProvider(
 		state.lastError = "OMLX credentials are not set";
 		return "not_configured";
 	}
+	return fetchAndRegister(pi, state, config, apiKey ?? "", opts);
+}
 
+/**
+ * Fetches the live catalog for an explicit apiRoot/apiKey and registers it.
+ * Used by the poll loop (values re-derived from storage/env) and by the
+ * oauth login flow (values just entered in the dialog, before pi persists
+ * them) — the login flow can't wait for the poll's next tick, since pi
+ * calls modelRegistry.refresh() synchronously right after login() resolves.
+ */
+async function fetchAndRegister(
+	pi: ExtensionAPI,
+	state: State,
+	config: OmlxConfig,
+	apiKey: string,
+	opts: { timeoutMs?: number } = {},
+): Promise<RefreshResult> {
 	const modelSettingsPath = resolveLocalModelSettingsPath(
 		process.env.OMLX_MODEL_SETTINGS_PATH,
 	);
 
 	let models: OmlxModel[];
 	try {
-		models = await fetchModels(config.apiRoot, apiKey ?? "", {
+		models = await fetchModels(config.apiRoot, apiKey, {
 			modelSettingsPath,
 			timeoutMs: opts.timeoutMs,
 		});

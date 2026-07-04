@@ -35,8 +35,10 @@ export function loadOmlxCredential(): OmlxStoredCredential | undefined {
 		return { baseUrl: cred.baseUrl, apiKey: cred.key };
 	}
 	if (cred.type === "oauth") {
-		if (!cred.access) return undefined;
-		return { baseUrl: cred.baseUrl, apiKey: cred.access };
+		// access may be legitimately empty for a keyless OMLX server
+		// (skip_api_key_verification) — baseUrl alone still counts as configured.
+		if (!cred.access && !cred.baseUrl) return undefined;
+		return { baseUrl: cred.baseUrl, apiKey: cred.access ?? "" };
 	}
 	return undefined;
 }
