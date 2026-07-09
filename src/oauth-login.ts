@@ -9,8 +9,8 @@ import { normalizeBaseUrl } from "./config.ts";
  * the real provider. Called from inside login() so the catalog is live by
  * the time pi's login dialog closes — pi calls modelRegistry.refresh()
  * synchronously right after login() resolves, before credentials even reach
- * storage, so waiting for the extension's background poll would leave the
- * placeholder model visible until the next poll tick or a restart.
+ * storage. This login path deliberately fetches immediately; the background
+ * poll is only a fallback for startup/refresh outside the login flow.
  */
 export type RegisterOmlxFromLogin = (
 	baseUrl: string,

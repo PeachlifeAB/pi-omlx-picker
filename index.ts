@@ -1,9 +1,3 @@
-import {
-	type Api,
-	type AssistantMessage,
-	createAssistantMessageEventStream,
-	type Model,
-} from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { PROVIDER_KEY } from "./src/auth-storage.ts";
 import { loadDotenvFromExtensionDir } from "./src/dotenv.ts";
@@ -19,7 +13,6 @@ import {
 	fetchModels,
 	type OmlxModel,
 	readCatalogCache,
-	readLastCatalogCache,
 	resolveLocalModelSettingsPath,
 	writeCatalogCache,
 } from "./src/catalog.ts";
@@ -51,7 +44,7 @@ interface State {
 	modelSettingsPath: string | undefined;
 }
 
-export default function (pi: ExtensionAPI): void {
+export default async function (pi: ExtensionAPI): Promise<void> {
 	const globalState = globalThis as Record<PropertyKey, unknown>;
 	if (globalState[EXTENSION_SINGLETON_KEY]) return;
 	globalState[EXTENSION_SINGLETON_KEY] = true;
@@ -67,6 +60,11 @@ export default function (pi: ExtensionAPI): void {
 	};
 
 	registerCachedOrSetupModels(pi, state);
+	const initialResult = await refreshProvider(pi, state, {
+		timeoutMs: STARTUP_TIMEOUT_MS,
+	});
+	if (initialResult !== "registered") registerCachedOrSetupModels(pi, state);
+
 	void startPolling(pi, state).catch((err) => {
 		state.lastError = err instanceof Error ? err.message : String(err);
 	});
@@ -119,7 +117,7 @@ function tryLoadConfig(): OmlxConfig | undefined {
 // host) followed by an API key prompt. "Use an API key" only asks for a key.
 // The oauth login itself fetches and registers the real catalog before
 // returning, so pi's post-login modelRegistry.refresh() sees real models
-// immediately instead of the startup placeholder.
+// immediately.
 function buildOmlxOauth(pi: ExtensionAPI, state: State) {
 	return {
 		name: "OMLX",
@@ -188,16 +186,13 @@ function missingLimitModelIds(models: OmlxModel[]): string[] {
 	return models.filter((model) => !isRegistrableModel(model)).map((m) => m.id);
 }
 
-// Placeholder registered when nothing else is available yet, purely so "omlx"
-// appears in pi's native /login list (built from already-registered models —
-// see registerCachedOrSetupModels). Never used to stream: the login flow
-// stores credentials and the next poll replaces this with the real catalog.
-const PLACEHOLDER_MODEL: OmlxModel = {
-	id: "omlx-placeholder",
-	displayName: "OMLX (configure via /login)",
-	contextWindow: 1,
-	maxTokens: 1,
-};
+function registerLoginOnlyProvider(pi: ExtensionAPI, state: State): void {
+	pi.unregisterProvider(PROVIDER);
+	pi.registerProvider(PROVIDER, {
+		name: "OMLX",
+		oauth: buildOmlxOauth(pi, state),
+	});
+}
 
 function registerCachedOrSetupModels(pi: ExtensionAPI, state: State): void {
 	const config = tryLoadConfig() ?? {
@@ -205,11 +200,9 @@ function registerCachedOrSetupModels(pi: ExtensionAPI, state: State): void {
 		apiKeyEnvVar: "OMLX_API_KEY",
 	};
 	const configured = resolveConfiguredApiKey() || hasOmlxTarget();
-	const cached = registrableCachedModels(readCatalogCache(config.apiRoot));
-	const fallbackCached = configured
-		? undefined
-		: registrableCachedModels(readLastCatalogCache());
-	const models = cached ?? fallbackCached;
+	const models = configured
+		? registrableCachedModels(readCatalogCache(config.apiRoot))
+		: undefined;
 	if (!models) {
 		state.config = config;
 		state.catalog = [];
@@ -219,67 +212,11 @@ function registerCachedOrSetupModels(pi: ExtensionAPI, state: State): void {
 			: "OMLX credentials are not set. Run /login and choose OMLX.";
 		state.lastRefreshAt = new Date().toISOString();
 		state.modelSettingsPath = undefined;
-		pi.registerProvider(PROVIDER, {
-			...toProviderConfig(config.apiRoot, config.apiKeyEnvVar, [
-				PLACEHOLDER_MODEL,
-			]),
-			name: "OMLX",
-			oauth: buildOmlxOauth(pi, state),
-			authHeader: false,
-			streamSimple: streamMissingCredentials,
-		});
+		registerLoginOnlyProvider(pi, state);
 		return;
 	}
 
-	// A key OR a configured base URL (keyless server) is enough to register the
-	// real provider. Pi omits the auth header when the resolved key is empty.
-	if (configured) {
-		registerModels(pi, state, config, models);
-		return;
-	}
-
-	pi.registerProvider(PROVIDER, {
-		...toProviderConfig(config.apiRoot, config.apiKeyEnvVar, models),
-		name: "OMLX",
-		oauth: buildOmlxOauth(pi, state),
-		authHeader: false,
-		streamSimple: streamMissingCredentials,
-	});
-	state.config = config;
-	state.catalog = models;
-	state.registered = true;
-	state.lastError = "OMLX credentials are not set. Run /login and choose OMLX.";
-	state.lastRefreshAt = new Date().toISOString();
-	state.modelSettingsPath = undefined;
-}
-
-function streamMissingCredentials(model: Model<Api>) {
-	const stream = createAssistantMessageEventStream();
-	const message: AssistantMessage = {
-		role: "assistant",
-		content: [],
-		api: model.api,
-		provider: model.provider,
-		model: model.id,
-		usage: {
-			input: 0,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			totalTokens: 0,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-		},
-		stopReason: "error",
-		errorMessage:
-			"OMLX credentials are not configured. Run /login, choose API key, select OMLX, then try the model again.",
-		timestamp: Date.now(),
-	};
-	queueMicrotask(() => {
-		stream.push({ type: "start", partial: message });
-		stream.push({ type: "error", reason: "error", error: message });
-		stream.end();
-	});
-	return stream;
+	registerModels(pi, state, config, models);
 }
 
 type RefreshResult = "registered" | "not_configured" | "failed";
