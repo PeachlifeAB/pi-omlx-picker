@@ -143,8 +143,9 @@ function registerModels(
 	config: OmlxConfig,
 	models: OmlxModel[],
 	modelSettingsPath?: string,
+	explicitApiKey?: string,
 ): void {
-	const keyless = !resolveConfiguredApiKey();
+	const keyless = !explicitApiKey && !resolveConfiguredApiKey();
 	pi.registerProvider(PROVIDER, {
 		name: "OMLX",
 		oauth: buildOmlxOauth(pi, state),
@@ -276,7 +277,7 @@ async function fetchAndRegister(
 	}
 
 	writeCatalogCache(config.apiRoot, registrable);
-	registerModels(pi, state, config, registrable, modelSettingsPath);
+	registerModels(pi, state, config, registrable, modelSettingsPath, apiKey);
 	return "registered";
 }
 
