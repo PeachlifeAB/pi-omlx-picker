@@ -1,6 +1,6 @@
 {
 	"name": "pi-omlx-picker",
-	"version": "0.3.5",
+	"version": "0.3.6",
 	"type": "module",
 	"description": "Pi extension that discovers models from a local OMLX server and registers them as a native Pi provider.",
 	"license": "MIT",
@@ -39,6 +39,8 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "latest",
+		"@earendil-works/pi-ai": "^0.80.9",
+		"@earendil-works/pi-coding-agent": "^0.80.9",
 		"@types/node": "latest",
 		"tsx": "latest",
 		"typescript": "latest",

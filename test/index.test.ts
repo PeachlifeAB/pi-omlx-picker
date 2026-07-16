@@ -1,12 +1,14 @@
 import { strict as assert } from "node:assert";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type {
 	ExtensionAPI,
 	ProviderConfig,
 } from "@earendil-works/pi-coding-agent";
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, test } from "vitest";
 import extension from "../index.ts";
-import { _setStorageForTesting } from "../src/auth-storage.ts";
+import { _setAuthPathForTesting } from "../src/auth-storage.ts";
 
 const singletonKey = Symbol.for("pi-omlx-picker/loaded");
 
@@ -30,13 +32,17 @@ function jsonResponse(body: unknown): Response {
 	} as Response;
 }
 
+let dir: string;
+
 beforeEach(() => {
-	_setStorageForTesting(AuthStorage.inMemory());
+	dir = mkdtempSync(join(tmpdir(), "pi-omlx-picker-index-"));
+	_setAuthPathForTesting(join(dir, "auth.json"));
 	delete (globalThis as Record<PropertyKey, unknown>)[singletonKey];
 });
 
 afterEach(() => {
-	_setStorageForTesting(undefined);
+	_setAuthPathForTesting(undefined);
+	rmSync(dir, { recursive: true, force: true });
 	delete (globalThis as Record<PropertyKey, unknown>)[singletonKey];
 });
 

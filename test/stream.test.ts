@@ -227,6 +227,31 @@ test("oMLX model streams body events and terminates on done", async () => {
 	assert.equal(events.at(-1)?.type, "done");
 });
 
+test("a thrown oMLX context-overflow error is normalized like a streamed error event", async () => {
+	const raw =
+		'400: {"message":"Prompt too long: 98353 tokens exceeds max context window of 97000 tokens","type":"invalid_request_error"}';
+	innerStreamModule.queueFactory(async function* () {
+		yield* [] as AssistantMessageEvent[];
+		throw new Error(raw);
+	});
+
+	const events = await collect(
+		streamOmlxOpenAICompletions(
+			OMLX_MODEL,
+			EMPTY_CONTEXT,
+			undefined,
+			5_000,
+			undefined,
+		),
+	);
+	const last = events.at(-1);
+	assert.equal(last?.type, "error");
+	assert.equal(
+		(last as { error: AssistantMessage }).error.errorMessage,
+		`prompt is too long: 98353 tokens exceeds the context window of 97000 tokens (${raw})`,
+	);
+});
+
 test("buffered thinking is flushed when the inner stream errors mid-stream", async () => {
 	const partial = blankAssistant();
 	// The reachable data-loss path: thinking is buffered (and clears the

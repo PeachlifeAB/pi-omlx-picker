@@ -23,6 +23,7 @@ import {
 	type OmlxConfig,
 	resolveConfiguredApiKey,
 } from "./src/config.ts";
+import { pickerDebug } from "./src/debug.ts";
 import { toProviderConfig } from "./src/provider.ts";
 import { applyOmlxThinkingControls } from "./src/thinking.ts";
 
@@ -69,8 +70,24 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		state.lastError = err instanceof Error ? err.message : String(err);
 	});
 
+	pi.on("model_select", (event) => {
+		pickerDebug("model_select", {
+			provider: event.model.provider,
+			model: event.model.id,
+			source: event.source,
+		});
+	});
+
 	pi.on("before_provider_request", (event, ctx) => {
 		if (ctx.model?.provider !== PROVIDER) return;
+		pickerDebug("before_provider_request", {
+			provider: ctx.model.provider,
+			model: ctx.model.id,
+			payloadKeys:
+				event.payload && typeof event.payload === "object"
+					? Object.keys(event.payload as object)
+					: [],
+		});
 		const activeModel = findCatalogModel(state, ctx.model.id);
 		return applyOmlxThinkingControls(
 			event.payload,
@@ -165,6 +182,11 @@ function registerModels(
 	state.lastError = undefined;
 	state.lastRefreshAt = new Date().toISOString();
 	state.modelSettingsPath = modelSettingsPath;
+	pickerDebug("provider_registered", {
+		provider: PROVIDER,
+		models: models.length,
+		streamSimple: true,
+	});
 }
 
 function isRegistrableModel(model: OmlxModel): boolean {

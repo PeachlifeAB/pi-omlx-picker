@@ -22,7 +22,8 @@ import {
 // is not resolvable there, so the concrete module is reached through compat.
 import { openAICompletionsApi } from "@earendil-works/pi-ai/compat";
 import { PROVIDER_KEY } from "./auth-storage.ts";
-import { normalizeErrorEvent } from "./overflow.ts";
+import { pickerDebug } from "./debug.ts";
+import { normalizeErrorEvent, normalizeOverflowMessage } from "./overflow.ts";
 import { isRepeatStop } from "./repeat-stop.ts";
 import { isMeaningfulBodyEvent, isThinkingEvent } from "./stream-events.ts";
 import { StreamWriter } from "./stream-writer.ts";
@@ -148,7 +149,22 @@ async function runAttempt(
 			}
 			flushThinking(writer, bufferedThinking);
 			bufferedThinking = [];
-			writer.push(normalizeErrorEvent(event));
+			if (event.type === "error") {
+				const rawErrorMessage = event.error?.errorMessage;
+				const normalized = normalizeErrorEvent(event);
+				pickerDebug("stream_error_normalized", {
+					model: model.id,
+					rawErrorMessage,
+					normalizedErrorMessage:
+						normalized.type === "error"
+							? normalized.error?.errorMessage
+							: undefined,
+					changed: normalized !== event,
+				});
+				writer.push(normalized);
+			} else {
+				writer.push(normalizeErrorEvent(event));
+			}
 			if (event.type === "done" || event.type === "error") break;
 		}
 	} catch (err) {
@@ -177,7 +193,17 @@ export function streamOmlxOpenAICompletions(
 	// (groq, zai, glm, ...) also arrive here. Pass them straight through to the
 	// concrete implementation with no oMLX-specific timeout/reissue logic, so the
 	// extension cannot perturb unrelated providers.
+	pickerDebug("stream_simple_entered", {
+		provider: model.provider,
+		model: model.id,
+		isOmlx: model.provider === PROVIDER_KEY,
+		contextMessages: context.messages.length,
+	});
 	if (model.provider !== PROVIDER_KEY) {
+		pickerDebug("stream_simple_bypassed", {
+			provider: model.provider,
+			model: model.id,
+		});
 		return streamOpenAICompletionsImpl(
 			model as Model<"openai-completions">,
 			context,
@@ -233,11 +259,18 @@ export function streamOmlxOpenAICompletions(
 			}
 		} catch (error) {
 			if (writer.closed) return;
+			const rawErrorMessage =
+				error instanceof Error ? error.message : String(error);
+			const normalizedErrorMessage = normalizeOverflowMessage(rawErrorMessage);
 			const aborted = options?.signal?.aborted === true;
-			writer.pushError(
-				error instanceof Error ? error.message : String(error),
-				aborted ? "aborted" : "error",
-			);
+			pickerDebug("stream_throw_normalized", {
+				model: model.id,
+				rawErrorMessage,
+				normalizedErrorMessage,
+				changed: rawErrorMessage !== normalizedErrorMessage,
+				aborted,
+			});
+			writer.pushError(normalizedErrorMessage, aborted ? "aborted" : "error");
 			writer.end();
 		}
 	})();

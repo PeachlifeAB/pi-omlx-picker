@@ -1,10 +1,9 @@
 import { strict as assert } from "node:assert";
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, test } from "vitest";
-import {
-	_setStorageForTesting,
-	saveOmlxCredential,
-} from "../src/auth-storage.ts";
+import { _setAuthPathForTesting, PROVIDER_KEY } from "../src/auth-storage.ts";
 import {
 	applyStoredCredentialToEnv,
 	DEFAULT_OMLX_BASE_URL,
@@ -43,11 +42,28 @@ test("normalizeBaseUrl rejects empty string", () => {
 	assert.throws(() => normalizeBaseUrl("   "), /empty/);
 });
 
+let dir: string;
+let authPath: string;
+
+function storeCredential(baseUrl: string, apiKey: string): void {
+	writeFileSync(
+		authPath,
+		JSON.stringify(
+			{ [PROVIDER_KEY]: { type: "api_key", key: apiKey, baseUrl } },
+			null,
+			2,
+		),
+	);
+}
+
 beforeEach(() => {
-	_setStorageForTesting(AuthStorage.inMemory());
+	dir = mkdtempSync(join(tmpdir(), "pi-omlx-picker-config-"));
+	authPath = join(dir, "auth.json");
+	_setAuthPathForTesting(authPath);
 });
 afterEach(() => {
-	_setStorageForTesting(undefined);
+	_setAuthPathForTesting(undefined);
+	rmSync(dir, { recursive: true, force: true });
 });
 
 test("loadConfig defaults to local OMLX base URL", () => {
@@ -63,12 +79,12 @@ test("loadConfig returns normalized explicit apiRoot and env var name", () => {
 });
 
 test("loadConfig uses stored base URL when env is absent", () => {
-	saveOmlxCredential("https://stored/v1", "stored-k");
+	storeCredential("https://stored/v1", "stored-k");
 	assert.equal(loadConfig({}).apiRoot, "https://stored/v1");
 });
 
 test("loadConfig does not mix env API key with stored base URL", () => {
-	saveOmlxCredential("https://stored/v1", "stored-k");
+	storeCredential("https://stored/v1", "stored-k");
 	assert.equal(
 		loadConfig({ OMLX_API_KEY: "shell-k" }).apiRoot,
 		DEFAULT_OMLX_BASE_URL,
@@ -76,17 +92,17 @@ test("loadConfig does not mix env API key with stored base URL", () => {
 });
 
 test("resolveConfiguredApiKey prefers explicit env var", () => {
-	saveOmlxCredential("https://stored/v1", "stored-k");
+	storeCredential("https://stored/v1", "stored-k");
 	assert.equal(resolveConfiguredApiKey({ OMLX_API_KEY: "shell-k" }), "shell-k");
 });
 
 test("resolveConfiguredApiKey falls back to stored credential", () => {
-	saveOmlxCredential("https://stored/v1", "stored-k");
+	storeCredential("https://stored/v1", "stored-k");
 	assert.equal(resolveConfiguredApiKey({}), "stored-k");
 });
 
 test("resolveConfiguredApiKey does not mix env base URL with stored key", () => {
-	saveOmlxCredential("https://stored/v1", "stored-k");
+	storeCredential("https://stored/v1", "stored-k");
 	assert.equal(
 		resolveConfiguredApiKey({ OMLX_BASE_URL: "https://shell/v1" }),
 		undefined,
@@ -102,7 +118,7 @@ test("hasOmlxTarget is true with an env base URL but no key (keyless)", () => {
 });
 
 test("hasOmlxTarget is true when only a stored credential exists", () => {
-	saveOmlxCredential("https://stored/v1", "stored-k");
+	storeCredential("https://stored/v1", "stored-k");
 	assert.equal(hasOmlxTarget({}), true);
 });
 
@@ -118,7 +134,7 @@ test("applyStoredCredentialToEnv returns false when no stored creds", () => {
 });
 
 test("applyStoredCredentialToEnv populates env when stored creds exist", () => {
-	saveOmlxCredential("https://stored/v1", "stored-k");
+	storeCredential("https://stored/v1", "stored-k");
 	const env: NodeJS.ProcessEnv = {};
 	assert.equal(applyStoredCredentialToEnv(env), true);
 	assert.equal(env.OMLX_BASE_URL, "https://stored/v1");
@@ -126,7 +142,7 @@ test("applyStoredCredentialToEnv populates env when stored creds exist", () => {
 });
 
 test("applyStoredCredentialToEnv yields to explicit env pair", () => {
-	saveOmlxCredential("https://stored/v1", "stored-k");
+	storeCredential("https://stored/v1", "stored-k");
 	const env: NodeJS.ProcessEnv = {
 		OMLX_BASE_URL: "https://shell/v1",
 		OMLX_API_KEY: "shell-k",
@@ -137,7 +153,7 @@ test("applyStoredCredentialToEnv yields to explicit env pair", () => {
 });
 
 test("applyStoredCredentialToEnv does not mix partial env with stored creds", () => {
-	saveOmlxCredential("https://stored/v1", "stored-k");
+	storeCredential("https://stored/v1", "stored-k");
 	const env: NodeJS.ProcessEnv = { OMLX_BASE_URL: "https://shell/v1" };
 	assert.equal(applyStoredCredentialToEnv(env), false);
 	assert.equal(env.OMLX_BASE_URL, "https://shell/v1");
