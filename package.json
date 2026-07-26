@@ -40,7 +40,7 @@
 	"devDependencies": {
 		"@biomejs/biome": "latest",
 		"@earendil-works/pi-ai": "^0.80.9",
-		"@earendil-works/pi-coding-agent": "^0.80.9",
+		"@earendil-works/pi-coding-agent": "^0.82.1",
 		"@types/node": "latest",
 		"tsx": "latest",
 		"typescript": "latest",
